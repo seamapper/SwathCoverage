@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-KMALL to PKL Converter - Standalone Application
+KMALL to Swath PKL Converter
 
 A standalone GUI application to convert KMALL files to optimized PKL files
 for use with the Swath Coverage Plotter.
@@ -34,7 +34,14 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 # Add the current directory to the path to allow importing from libs folder
-current_dir = os.path.dirname(os.path.abspath(__file__))
+# Handle PyInstaller onefile mode (extracts to temporary directory)
+if getattr(sys, 'frozen', False):
+    # Running as compiled executable
+    current_dir = sys._MEIPASS
+else:
+    # Running as script
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
 sys.path.insert(0, current_dir)
 
 try:
@@ -52,7 +59,14 @@ __version__ = "2025.01"  # First Release of the program
 
 def load_session_config():
     """Load session configuration from file"""
-    config_file = os.path.join(os.path.dirname(__file__), 'converter_session.json')
+    # Get the directory where the executable or script is located
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable - save config next to exe
+        exe_dir = os.path.dirname(sys.executable)
+    else:
+        # Running as script
+        exe_dir = os.path.dirname(os.path.abspath(__file__))
+    config_file = os.path.join(exe_dir, 'converter_session.json')
     default_config = {
         'last_input_dir': '',
         'last_output_dir': '',
@@ -76,7 +90,14 @@ def load_session_config():
 
 def save_session_config(config):
     """Save session configuration to file"""
-    config_file = os.path.join(os.path.dirname(__file__), 'converter_session.json')
+    # Get the directory where the executable or script is located
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable - save config next to exe
+        exe_dir = os.path.dirname(sys.executable)
+    else:
+        # Running as script
+        exe_dir = os.path.dirname(os.path.abspath(__file__))
+    config_file = os.path.join(exe_dir, 'converter_session.json')
     
     try:
         with open(config_file, 'w') as f:
@@ -593,7 +614,7 @@ class ConversionWorker(QThread):
 
 
 class KMALLToPKLConverter(QMainWindow):
-    """Main application window for KMALL to PKL conversion"""
+    """Main application window for KMALL to Swath PKL conversion"""
     
     def __init__(self):
         super().__init__()
@@ -623,7 +644,7 @@ class KMALLToPKLConverter(QMainWindow):
     
     def init_ui(self):
         """Initialize the user interface"""
-        self.setWindowTitle(f"KMall to PJK Convert - V{__version__} - pjohnson@ccom.unh.edu")
+        self.setWindowTitle(f"KMALL to Swath PKL Converter - V{__version__} - pjohnson@ccom.unh.edu")
         self.setGeometry(100, 100, 600, 500)
         
         # Set application-wide style to ensure text visibility
@@ -660,7 +681,7 @@ class KMALLToPKLConverter(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         
         # Title
-        title_label = QLabel("KMALL to PKL Converter")
+        title_label = QLabel("KMALL to Swath PKL Converter")
         title_label.setStyleSheet("font-size: 18px; font-weight: bold; margin: 10px;")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         main_layout.addWidget(title_label)
@@ -988,7 +1009,14 @@ class KMALLToPKLConverter(QMainWindow):
     def clear_session_config(self):
         """Clear session configuration and reset to defaults"""
         try:
-            config_file = os.path.join(os.path.dirname(__file__), 'converter_session.json')
+            # Get the directory where the executable or script is located
+            if getattr(sys, 'frozen', False):
+                # Running as compiled executable - save config next to exe
+                exe_dir = os.path.dirname(sys.executable)
+            else:
+                # Running as script
+                exe_dir = os.path.dirname(os.path.abspath(__file__))
+            config_file = os.path.join(exe_dir, 'converter_session.json')
             if os.path.exists(config_file):
                 os.remove(config_file)
             
