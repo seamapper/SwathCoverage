@@ -3916,6 +3916,12 @@ def export_gap_filler_trend(self):
         fname_out = trend_path[0]
 
         print('trend fname_out = ', fname_out)
+        
+        # Check if user cancelled the file dialog
+        if not fname_out:
+            update_log(self, 'Export cancelled by user')
+            return
+        
         # trend_z = np.round([0] + self.trend_bin_centers + [10000]).tolist()
         trend_z = np.round([0] + z + [10000]).tolist()
         trend_y = np.round([5] + nwd.tolist() + [0], decimals=1).tolist()

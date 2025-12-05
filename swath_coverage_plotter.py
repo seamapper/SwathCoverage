@@ -57,7 +57,8 @@ import matplotlib.pyplot as plt
 # __version__ = "2025.07"  # Improved swatch coverage curve specification plotting 
 #__version__ = "2025.08"  # Enhanced theoretical performance plotting 
 # __version__ = "2025.09"  # GUI improvements, Fixed Plots Scaling
-__version__ = "2025.10"  # Reorganized sources area into tabs   
+# __version__ = "2025.10"  # Reorganized sources area into tabs   
+__version__ = "2025.11"  # Fixed plot decimation to only run when filter settings are changed
 
 class MainWindow(QtWidgets.QMainWindow):
     """
