@@ -33,38 +33,20 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout
                            QMessageBox, QCheckBox, QGroupBox, QWidget, QGridLayout)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
-# Add the multibeam_tools library to the path
+# Add the current directory to the path to allow importing from libs folder
 current_dir = os.path.dirname(os.path.abspath(__file__))
-
-# First try the mock module structure
 sys.path.insert(0, current_dir)
 
-# Also try the original structure
-multibeam_tools_path = os.path.join(current_dir, 'MultibeamToolsAI', 'multibeam_tools', 'libs')
-sys.path.insert(0, multibeam_tools_path)
-
-# Also add the parent directory to allow relative imports
-multibeam_tools_parent = os.path.join(current_dir, 'MultibeamToolsAI', 'multibeam_tools')
-sys.path.insert(0, multibeam_tools_parent)
-
 try:
-    # Try importing from the mock structure first
-    # from multibeam_tools.libs.swath_fun import readKMALLswath, readALLswath  # Removed to avoid sortDetectionsCoverage calls
-    # from swath_coverage_lib import sortDetectionsCoverage  # Removed to avoid conflicts
-    print("Successfully imported multibeam_tools libraries from mock structure")
+    # Try importing from the libs folder
+    from libs.swath_fun import readKMALLswath, readALLswath
+    print("Successfully imported libraries from libs folder")
     MULTIBEAM_TOOLS_AVAILABLE = True
-except ImportError:
-    try:
-        # Try importing from the original structure
-        from swath_fun import readKMALLswath, readALLswath
-        # from swath_coverage_lib import sortDetectionsCoverage  # Removed to avoid conflicts
-        print("Successfully imported multibeam_tools libraries from original structure")
-        MULTIBEAM_TOOLS_AVAILABLE = True
-    except ImportError as e:
-        print(f"Warning: Could not import multibeam_tools libraries: {e}")
-        print("Please ensure the MultibeamToolsAI directory structure is correct")
-        # We'll handle this gracefully in the GUI
-        MULTIBEAM_TOOLS_AVAILABLE = False
+except ImportError as e:
+    print(f"Warning: Could not import libraries from libs folder: {e}")
+    print("Please ensure the libs folder is present in the same directory as this script")
+    # We'll handle this gracefully in the GUI
+    MULTIBEAM_TOOLS_AVAILABLE = False
 
 __version__ = "2025.01"  # First Release of the program
 
@@ -633,11 +615,11 @@ class KMALLToPKLConverter(QMainWindow):
             self.output_label.setText(f"Output: {self.last_output_dir}")
             self.update_convert_button_state()
         
-        # Check if multibeam_tools libraries are available
+        # Check if libraries are available
         if not MULTIBEAM_TOOLS_AVAILABLE:
-            self.log_message("WARNING: Multibeam tools libraries not available")
+            self.log_message("WARNING: Libraries not available")
             self.log_message("Conversion will create empty PKL files")
-            self.log_message("Please ensure MultibeamToolsAI directory structure is correct")
+            self.log_message("Please ensure the libs folder is present in the same directory as this script")
     
     def init_ui(self):
         """Initialize the user interface"""
