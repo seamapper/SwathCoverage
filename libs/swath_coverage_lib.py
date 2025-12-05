@@ -177,7 +177,7 @@ def setup(self):
     self.model_list = ['EM 2040', 'EM 2042', 'EM 302', 'EM 304', 'EM 710', 'EM 712', 'EM 122', 'EM 124']
     self.cmode_list = ['Depth', 'Backscatter', 'Ping Mode', 'Pulse Form', 'Swath Mode', 'Frequency', 'Solid Color']
     self.top_data_list = []
-    self.clim_list = ['All data', 'Filtered data', 'Fixed limits']
+    self.clim_list = ['All data', 'Filtered data', 'Fixed limits', 'Custom Plot']
     self.sis4_tx_z_field = 'S1Z'  # .all IP datagram field name for TX array Z offset (meters +down from origin)
     self.sis4_waterline_field = 'WLZ'  # .all IP datagram field name for waterline Z offset (meters +down from origin
     self.depth_ref_list = ['Waterline', 'Origin', 'TX Array', 'Raw Data']
@@ -306,11 +306,20 @@ def init_swath_ax(self):  # set initial swath parameters
     self.dr_max = 1000
     self.pi_max = 10
     self.x_max_custom = self.x_max  # store future custom entries
-    self.z_max_custom = self.z_max
+    # Use default value from text box if it exists and is valid, otherwise default to 4000
+    if hasattr(self, 'max_z_tb') and self.max_z_tb.text():
+        try:
+            self.z_max_custom = float(self.max_z_tb.text())
+        except ValueError:
+            self.z_max_custom = 4000.0  # Default to 4000 if text box value is invalid
+            self.max_z_tb.setText('4000')
+    else:
+        self.z_max_custom = 4000.0  # Default to 4000
+        if hasattr(self, 'max_z_tb'):
+            self.max_z_tb.setText('4000')
     self.dr_max_custom = self.dr_max
     self.pi_max_custom = self.pi_max
     self.max_x_tb.setText(str(self.x_max))
-    self.max_z_tb.setText(str(self.z_max))
     self.max_dr_tb.setText(str(self.dr_max))
     self.max_pi_tb.setText(str(self.pi_max))
     update_color_modes(self)
@@ -522,6 +531,13 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
     # update_system_info(self)
     self.pt_size = np.square(float(self.pt_size_cbox.currentText()))
     self.pt_alpha = np.divide(float(self.pt_alpha_cbox.currentText()), 100)
+
+    # Check if cache should be invalidated due to filter or decimation setting changes
+    # Only invalidate if settings actually changed (not just visual params)
+    if hasattr(self, '_check_filter_settings_changed') and hasattr(self, '_check_decimation_settings_changed'):
+        if self._check_filter_settings_changed() or self._check_decimation_settings_changed():
+            if hasattr(self, '_invalidate_decimation_cache'):
+                self._invalidate_decimation_cache()
 
     if validate_filters:
         if not validate_filter_text(self):  # validate user input, do not refresh until all float(input) works for all input
@@ -1077,6 +1093,27 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
                     self.clim = [min(c_all), max(c_all)]
                 else:
                     self.clim = deepcopy(self.last_depth_clim)
+        elif self.clim_cbox.currentText() == 'Custom Plot':
+            print('DEBUG: Using Custom Plot option for depth color scaling')
+            # Use min and max values from Depth groupbox in Use custom plot limits
+            if hasattr(self, 'min_z_tb') and hasattr(self, 'max_z_tb'):
+                try:
+                    min_val = float(self.min_z_tb.text()) if self.min_z_tb.text() else 0.0
+                    max_val = float(self.max_z_tb.text()) if self.max_z_tb.text() else 4000.0
+                    self.clim = [min_val, max_val]
+                    print(f'DEBUG: Using Custom Plot range for color scaling: {self.clim}')
+                except ValueError:
+                    print('DEBUG: Invalid Custom Plot values, falling back to data range')
+                    if len(c_all) > 0:
+                        self.clim = [min(c_all), max(c_all)]
+                    else:
+                        self.clim = deepcopy(self.last_depth_clim)
+            else:
+                print('DEBUG: Custom Plot text boxes not found, falling back to data range')
+                if len(c_all) > 0:
+                    self.clim = [min(c_all), max(c_all)]
+                else:
+                    self.clim = deepcopy(self.last_depth_clim)
         else:
             print(f'DEBUG: Using {self.clim_cbox.currentText()} option for depth color scaling')
             # Use actual data range for color scaling
@@ -1208,55 +1245,117 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
         print('AFTER APPLYING IDX: len y_all, z_all, angle_all, bs_all, c_all=',
               len(y_all), len(z_all), len(angle_all), len(bs_all), len(c_all))
 
-    # get post-filtering number of points to plot and allowable maximum from default or user input (if selected)
-    self.n_points = len(y_all)
-    self.n_points_max = self.n_points_max_default
+    # Store the filtered length and hash before decimation for cache validation
+    n_points_filtered_before_decimation = len(y_all)
+    data_hash_before_decimation = hash(tuple(y_all[:100]) if len(y_all) > 100 else tuple(y_all))
+    
+    # Check if we can use cached decimated data (only for visual parameter changes)
+    cache_key = None
+    use_cached_data = False
+    if hasattr(self, '_generate_plot_cache_key') and hasattr(self, 'decimation_cache'):
+        cache_key_base = self._generate_plot_cache_key(is_archive=is_archive)
+        # Add cmode to cache key since different color modes produce different c_all arrays
+        cache_key = f"{cache_key_base}|cmode:{cmode}"
+        
+        # Check if we have cached data for this key
+        if cache_key in self.decimation_cache:
+            cached = self.decimation_cache[cache_key]
+            # Verify the cache is still valid (data hasn't changed)
+            # Check if filtered data length matches (quick check)
+            # n_points_filtered in cache is the length BEFORE decimation
+            if cached.get('n_points_filtered') == n_points_filtered_before_decimation:
+                # More thorough check: compare hash of first 100 points of filtered data
+                if cached.get('data_hash') == data_hash_before_decimation:
+                    use_cached_data = True
+                    if print_updates:
+                        print(f'Using cached decimated data (saved processing time)')
+    
+    if not use_cached_data:
+        # get post-filtering number of points to plot and allowable maximum from default or user input (if selected)
+        self.n_points = len(y_all)
+        self.n_points_max = self.n_points_max_default
 
-    if self.pt_count_gb.isChecked() and self.max_count_tb.text():  # override default only if explicitly set by user
-        self.n_points_max = float(self.max_count_tb.text())
+        if self.pt_count_gb.isChecked() and self.max_count_tb.text():  # override default only if explicitly set by user
+            self.n_points_max = float(self.max_count_tb.text())
 
-    # default dec fac to meet n_points_max, regardless of whether user has checked box for plot point limits
-    if self.n_points_max == 0:
-        update_log(self, 'Max plotting sounding count set equal to zero')
-        self.dec_fac_default = np.inf
+        # default dec fac to meet n_points_max, regardless of whether user has checked box for plot point limits
+        if self.n_points_max == 0:
+            update_log(self, 'Max plotting sounding count set equal to zero')
+            self.dec_fac_default = np.inf
+        else:
+            self.dec_fac_default = float(self.n_points / self.n_points_max)
+
+        if self.dec_fac_default > 1 and not self.pt_count_gb.isChecked():  # warn user if large count may slow down plot
+            update_log(self, 'Large filtered sounding count (' + str(self.n_points) + ') may slow down plotting')
+
+        # get user dec fac as product of whether check box is checked (default 1)
+        self.dec_fac_user = max(self.pt_count_gb.isChecked() * float(self.dec_fac_tb.text()), 1)
+        self.dec_fac = max(self.dec_fac_default, self.dec_fac_user)
+
+        if self.dec_fac_default > self.dec_fac_user:  # warn user if default max limit was reached
+            update_log(self, 'Decimating' + (' archive' if is_archive else '') +
+                       ' data by factor of ' + "%.1f" % self.dec_fac +
+                       ' to keep plotted point count under ' + "%.0f" % self.n_points_max)
+
+        elif self.pt_count_gb.isChecked() and self.dec_fac_user > self.dec_fac_default and self.dec_fac_user > 1:
+            # otherwise, warn user if their manual dec fac was applied because it's more aggressive than max count
+            update_log(self, 'Decimating' + (' archive' if is_archive else '') +
+                       ' data by factor of ' + "%.1f" % self.dec_fac +
+                       ' per user input')
+
+        # print('before decimation, c_all=', c_all)
+
+        if self.dec_fac > 1:
+            # print('dec_fac > 1 --> attempting interp1d')
+            idx_all = np.arange(len(y_all))  # integer indices of all filtered data
+            idx_dec = np.arange(0, len(y_all) - 1, self.dec_fac)  # desired decimated indices, may be non-integer
+
+            # interpolate indices of colors, not color values directly
+            f_dec = interp1d(idx_all, idx_all, kind='nearest')  # nearest neighbor interpolation function of all indices
+            idx_new = [int(i) for i in f_dec(idx_dec)]  # list of decimated integer indices
+            # print('idx_new is now', idx_new)
+            y_all = [y_all[i] for i in idx_new]
+            z_all = [z_all[i] for i in idx_new]
+            c_all = [c_all[i] for i in idx_new]
+            # print('idx_new=', idx_new)
+
+        self.n_points = len(y_all)
+        
+        # Cache the decimated data for future use (when only visual params change)
+        if cache_key is not None and hasattr(self, 'decimation_cache'):
+            # Use the hash we calculated before decimation
+            self.decimation_cache[cache_key] = {
+                'y_all': y_all.copy() if isinstance(y_all, list) else list(y_all),
+                'z_all': z_all.copy() if isinstance(z_all, list) else list(z_all),
+                'c_all': c_all.copy() if isinstance(c_all, list) else list(c_all),
+                'fnames_all': self.fnames_all.copy() if isinstance(self.fnames_all, list) else list(self.fnames_all),
+                'n_points': self.n_points,
+                'n_points_filtered': n_points_filtered_before_decimation,  # Store the pre-decimation length
+                'data_hash': data_hash_before_decimation,  # Use the hash calculated before decimation
+                'dec_fac': self.dec_fac
+            }
+            if print_updates:
+                print(f'Cached decimated data for cmode: {cmode}')
     else:
-        self.dec_fac_default = float(self.n_points / self.n_points_max)
-
-    if self.dec_fac_default > 1 and not self.pt_count_gb.isChecked():  # warn user if large count may slow down plot
-        update_log(self, 'Large filtered sounding count (' + str(self.n_points) + ') may slow down plotting')
-
-    # get user dec fac as product of whether check box is checked (default 1)
-    self.dec_fac_user = max(self.pt_count_gb.isChecked() * float(self.dec_fac_tb.text()), 1)
-    self.dec_fac = max(self.dec_fac_default, self.dec_fac_user)
-
-    if self.dec_fac_default > self.dec_fac_user:  # warn user if default max limit was reached
-        update_log(self, 'Decimating' + (' archive' if is_archive else '') +
-                   ' data by factor of ' + "%.1f" % self.dec_fac +
-                   ' to keep plotted point count under ' + "%.0f" % self.n_points_max)
-
-    elif self.pt_count_gb.isChecked() and self.dec_fac_user > self.dec_fac_default and self.dec_fac_user > 1:
-        # otherwise, warn user if their manual dec fac was applied because it's more aggressive than max count
-        update_log(self, 'Decimating' + (' archive' if is_archive else '') +
-                   ' data by factor of ' + "%.1f" % self.dec_fac +
-                   ' per user input')
-
-    # print('before decimation, c_all=', c_all)
-
-    if self.dec_fac > 1:
-        # print('dec_fac > 1 --> attempting interp1d')
-        idx_all = np.arange(len(y_all))  # integer indices of all filtered data
-        idx_dec = np.arange(0, len(y_all) - 1, self.dec_fac)  # desired decimated indices, may be non-integer
-
-        # interpolate indices of colors, not color values directly
-        f_dec = interp1d(idx_all, idx_all, kind='nearest')  # nearest neighbor interpolation function of all indices
-        idx_new = [int(i) for i in f_dec(idx_dec)]  # list of decimated integer indices
-        # print('idx_new is now', idx_new)
-        y_all = [y_all[i] for i in idx_new]
-        z_all = [z_all[i] for i in idx_new]
-        c_all = [c_all[i] for i in idx_new]
-        # print('idx_new=', idx_new)
-
-    self.n_points = len(y_all)
+        # Use cached decimated data
+        cached = self.decimation_cache[cache_key]
+        y_all = cached['y_all'].copy() if hasattr(cached['y_all'], 'copy') else list(cached['y_all'])
+        z_all = cached['z_all'].copy() if hasattr(cached['z_all'], 'copy') else list(cached['z_all'])
+        c_all = cached['c_all'].copy() if hasattr(cached['c_all'], 'copy') else list(cached['c_all'])
+        self.fnames_all = cached['fnames_all'].copy() if hasattr(cached['fnames_all'], 'copy') else list(cached['fnames_all'])
+        self.n_points = cached['n_points']
+        if print_updates:
+            print(f'Using cached data: {self.n_points} points (saved processing time)')
+        # So we'll need to recalculate c_all from the original filtered data
+        # Actually, we can't easily do this without caching the pre-decimation c_all too
+        # For now, let's just recalculate c_all - it's still much faster than recalculating everything
+        if print_updates:
+            print(f'Using cached xyz data: {self.n_points} points (saved decimation time)')
+        
+        # Recalculate c_all for the decimated points based on current cmode
+        # This requires going back to the original filtered data, which we don't have cached
+        # So we'll need to recalculate c_all from scratch, but at least we saved the decimation step
+        # Actually, this is getting complex. Let's cache c_all separately per cmode instead.
 
     print('self n_points = ', self.n_points)
 
@@ -1291,6 +1390,15 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
 
         elif self.clim_cbox.currentText() == 'Fixed limits':  # update color limits from user entries
             self.clim = [float(self.min_clim_tb.text()), float(self.max_clim_tb.text())]
+        elif self.clim_cbox.currentText() == 'Custom Plot':  # update color limits from Depth groupbox in custom plot limits
+            if hasattr(self, 'min_z_tb') and hasattr(self, 'max_z_tb'):
+                try:
+                    min_val = float(self.min_z_tb.text()) if self.min_z_tb.text() else 0.0
+                    max_val = float(self.max_z_tb.text()) if self.max_z_tb.text() else 4000.0
+                    self.clim = [min_val, max_val]
+                except ValueError:
+                    # Fallback to existing clim if values are invalid
+                    pass
 
         # same color mode for new and archive: use clim_all_data
         elif self.cmode == self.cmode_arc and self.show_data_chk.isChecked() and self.show_data_chk_arc.isChecked():
@@ -1888,8 +1996,8 @@ def sortDetectionsCoverage(self, data, print_updates=False, params_only=False):
                 IOP_idx = max([i for i, t in enumerate(IOP_datetimes) if
                                t <= MRZ_datetimes[p]], default=0)
 
-                if IOP_datetimes[IOP_idx] > MRZ_datetimes[p]:
-                    print('*****ping', p, 'occurred before first runtime datagram; using first RTP dg in file')
+                # if IOP_datetimes[IOP_idx] > MRZ_datetimes[p]:
+                    # print('*****ping', p, 'occurred before first runtime datagram; using first RTP dg in file')
                 ##### END TEST FROM SWATH ACC SORTING
 
 
@@ -2085,16 +2193,21 @@ def update_axes(self):
     # update_data_axis(self)
 
     # set y limits to match across all plots
-    self.swath_ax.set_ylim(0, self.swath_ax_margin * self.z_max)  # set depth axis to 0 and 1.1 times max(z)
-    self.backscatter_ax.set_ylim(0, self.swath_ax_margin * self.z_max)  # set backscatter yaxis to same as swath_ax
-    self.pingmode_ax.set_ylim(0, self.swath_ax_margin * self.z_max)  # set ping mode yaxis to same as swath_ax
+    # Use custom min depth if plot limits are enabled and min_z_tb has a value, otherwise use 0
+    if self.plot_lim_gb.isChecked() and hasattr(self, 'min_z_tb') and self.min_z_tb.text():
+        z_min_limit = self.z_min_custom
+    else:
+        z_min_limit = 0
+    self.swath_ax.set_ylim(z_min_limit, self.swath_ax_margin * self.z_max)  # set depth axis with custom or 0 min and 1.1 times max(z)
+    self.backscatter_ax.set_ylim(z_min_limit, self.swath_ax_margin * self.z_max)  # set backscatter yaxis to same as swath_ax
+    self.pingmode_ax.set_ylim(z_min_limit, self.swath_ax_margin * self.z_max)  # set ping mode yaxis to same as swath_ax
     
-    self.pulseform_ax.set_ylim(0, self.swath_ax_margin * self.z_max)  # set pulse form yaxis to same as swath_ax
-    self.swathmode_ax.set_ylim(0, self.swath_ax_margin * self.z_max)  # set swath mode yaxis to same as swath_ax
-    self.frequency_ax.set_ylim(0, self.swath_ax_margin * self.z_max)  # set frequency yaxis to same as swath_ax
-    self.data_rate_ax1.set_ylim(0, self.swath_ax_margin * self.z_max)  # set data rate yaxis to same as swath_ax
-    self.data_rate_ax2.set_ylim(0, self.swath_ax_margin * self.z_max)  # set ping rate yaxis to same as swath_ax
-    self.hist_ax.set_ylim(0, self.swath_ax_margin * self.z_max)  # set hist axis to same as swath_ax
+    self.pulseform_ax.set_ylim(z_min_limit, self.swath_ax_margin * self.z_max)  # set pulse form yaxis to same as swath_ax
+    self.swathmode_ax.set_ylim(z_min_limit, self.swath_ax_margin * self.z_max)  # set swath mode yaxis to same as swath_ax
+    self.frequency_ax.set_ylim(z_min_limit, self.swath_ax_margin * self.z_max)  # set frequency yaxis to same as swath_ax
+    self.data_rate_ax1.set_ylim(z_min_limit, self.swath_ax_margin * self.z_max)  # set data rate yaxis to same as swath_ax
+    self.data_rate_ax2.set_ylim(z_min_limit, self.swath_ax_margin * self.z_max)  # set ping rate yaxis to same as swath_ax
+    self.hist_ax.set_ylim(z_min_limit, self.swath_ax_margin * self.z_max)  # set hist axis to same as swath_ax
 
     # update x limits
     print('in update_axes, setting new xlims with dr_max and pi_max =', self.dr_max, self.pi_max)
@@ -2200,10 +2313,11 @@ def update_plot_limits(self):
         self.pi_max_custom = max([self.pi_max, self.pi_max_custom])
 
     if self.plot_lim_gb.isChecked():  # use custom plot limits if checked
-        self.x_max_custom = int(self.max_x_tb.text())
-        self.z_max_custom = int(self.max_z_tb.text())
-        self.dr_max_custom = int(self.max_dr_tb.text())
-        self.pi_max_custom = int(self.max_pi_tb.text())
+        self.x_max_custom = int(self.max_x_tb.text()) if self.max_x_tb.text() else 0
+        self.z_min_custom = int(self.min_z_tb.text()) if self.min_z_tb.text() else 0
+        self.z_max_custom = int(self.max_z_tb.text()) if self.max_z_tb.text() else 0
+        self.dr_max_custom = int(self.max_dr_tb.text()) if self.max_dr_tb.text() else 0
+        self.pi_max_custom = int(self.max_pi_tb.text()) if self.max_pi_tb.text() else 0
         self.x_max = self.x_max_custom / self.swath_ax_margin  # divide custom limit by axis margin (multiplied later)
         self.z_max = self.z_max_custom / self.swath_ax_margin
         self.dr_max = self.dr_max_custom / self.swath_ax_margin
@@ -2212,6 +2326,11 @@ def update_plot_limits(self):
     else:  # revert to automatic limits from the data if unchecked, but keep the custom numbers in text boxes
         self.plot_lim_gb.setChecked(False)
         self.max_x_tb.setText(str(int(self.x_max_custom)))
+        if hasattr(self, 'min_z_tb'):
+            if hasattr(self, 'z_min_custom'):
+                self.min_z_tb.setText(str(int(self.z_min_custom)))
+            else:
+                self.min_z_tb.setText('0')
         self.max_z_tb.setText(str(int(self.z_max_custom)))
         self.max_dr_tb.setText(str(int(self.dr_max_custom)))
         self.max_pi_tb.setText(str(int(self.pi_max_custom)))
@@ -2551,12 +2670,12 @@ def save_plot(self):
     fname_out = plot_path[0]
     fname_out_data = fname_out.replace('.png', '_data_rate.png')
 
-    if self.standard_fig_size_chk.isChecked():
-        orig_size_swath = self.swath_figure.get_size_inches()
-        orig_size_data = self.data_figure.get_size_inches()
-        update_log(self, 'Resizing image to save... please wait...')
-        self.swath_figure.set_size_inches(12, 12)
-        self.data_figure.set_size_inches(12, 12)
+    # Always use standard figure size when saving
+    orig_size_swath = self.swath_figure.get_size_inches()
+    orig_size_data = self.data_figure.get_size_inches()
+    update_log(self, 'Resizing image to save... please wait...')
+    self.swath_figure.set_size_inches(12, 12)
+    self.data_figure.set_size_inches(12, 12)
 
     # Apply tight layout to reduce margins before saving
     # Use rect parameter to preserve space for title at top
@@ -2575,11 +2694,11 @@ def save_plot(self):
                               transparent=False, bbox_inches='tight', pad_inches=0.2,
                               metadata=None)
 
-    if self.standard_fig_size_chk.isChecked():
-        update_log(self, 'Resetting original image size... please wait...')
-        self.swath_figure.set_size_inches(orig_size_swath[0], orig_size_swath[1], forward=True)  # forward resize to GUI
-        self.data_figure.set_size_inches(orig_size_data[0], orig_size_data[1], forward=True)
-        refresh_plot(self, call_source='save_plot')
+    # Always restore original figure size after saving
+    update_log(self, 'Resetting original image size... please wait...')
+    self.swath_figure.set_size_inches(orig_size_swath[0], orig_size_swath[1], forward=True)  # forward resize to GUI
+    self.data_figure.set_size_inches(orig_size_data[0], orig_size_data[1], forward=True)
+    refresh_plot(self, call_source='save_plot')
 
     # Save the directory for next time
     if fname_out:
@@ -2674,13 +2793,12 @@ def save_all_plots(self):
     # Save each plot with same dimensions and layout as depth plot
     saved_count = 0
     
-    # Store original figure sizes if using standard size
+    # Always use standard size when saving - store original figure sizes
     original_sizes = {}
-    if self.standard_fig_size_chk.isChecked():
-        update_log(self, 'Resizing images to save... please wait...')
-        for plot_type, figure in plot_types:
-            original_sizes[plot_type] = figure.get_size_inches()
-            figure.set_size_inches(12, 12)
+    update_log(self, 'Resizing images to save... please wait...')
+    for plot_type, figure in plot_types:
+        original_sizes[plot_type] = figure.get_size_inches()
+        figure.set_size_inches(12, 12)
     
     for plot_type, figure in plot_types:
         try:
@@ -2747,12 +2865,11 @@ def save_all_plots(self):
             update_log(self, f'Error saving {plot_type} plot: {str(e)}')
             update_log(self, f'Error details: {error_details}')
     
-    # Restore original figure sizes if using standard size
-    if self.standard_fig_size_chk.isChecked():
-        update_log(self, 'Resetting original image sizes... please wait...')
-        for plot_type, figure in plot_types:
-            if plot_type in original_sizes:
-                figure.set_size_inches(original_sizes[plot_type][0], original_sizes[plot_type][1], forward=True)
+    # Always restore original figure sizes after saving
+    update_log(self, 'Resetting original image sizes... please wait...')
+    for plot_type, figure in plot_types:
+        if plot_type in original_sizes:
+            figure.set_size_inches(original_sizes[plot_type][0], original_sizes[plot_type][1], forward=True)
         refresh_plot(self, call_source='save_all_plots')
     
     # Save the new settings for next session

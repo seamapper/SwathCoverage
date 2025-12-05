@@ -56,7 +56,8 @@ import matplotlib.pyplot as plt
 # __version__ = "2025.06"  # Fixed issue with loading new PKL files, added loading directory
 # __version__ = "2025.07"  # Improved swatch coverage curve specification plotting 
 #__version__ = "2025.08"  # Enhanced theoretical performance plotting 
-__version__ = "2025.09"  # GUI improvements, Fixed Plots Scaling
+# __version__ = "2025.09"  # GUI improvements, Fixed Plots Scaling
+__version__ = "2025.10"  # Reorganized sources area into tabs   
 
 class MainWindow(QtWidgets.QMainWindow):
     """
@@ -136,7 +137,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.model_list = ['EM 2040', 'EM 2042', 'EM 302', 'EM 304', 'EM 710', 'EM 712', 'EM 122', 'EM 124']
         self.depth_ref_list = ['Waterline', 'Origin', 'TX Array', 'Raw Data']
         self.top_data_list = []
-        self.clim_list = ['All data', 'Filtered data', 'Fixed limits']
+        self.clim_list = ['All data', 'Filtered data', 'Fixed limits', 'Custom Plot']
         self.clim_last_user = {'depth': [0, 1000], 'backscatter': [-50, -10]}
         
         # Initialize default parameters
@@ -232,7 +233,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Initialize custom plot limits
         self.x_max_custom = 0.0
-        self.z_max_custom = 0.0
+        self.z_min_custom = 0.0
+        self.z_max_custom = 4000.0
         self.dr_max_custom = 1000
         self.pi_max_custom = 10
         self.dr_max = 1000
@@ -860,10 +862,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.prog_layout = BoxLayout([self.current_file_lbl, self.sounding_file_lbl], 'v')
         self.prog_layout.addLayout(calc_pb_layout)
 
-        # Set the left panel layout with file controls on top and log on bottom
-        # Sources area gets 75% of space, activity log gets 25%
+        # Set the left panel layout with file controls on top, export trend, log, and progress on bottom
+        # Sources area gets 75% of space, export trend and activity log get 25%
         self.left_layout = QtWidgets.QVBoxLayout()
         self.left_layout.addWidget(file_gb, 7)  # Sources area gets 70% of space (stretch factor 7)
+        # Export Trend groupbox will be added here after it's created in set_right_layout()
         self.left_layout.addWidget(log_gb, 3)   # Activity log gets 30% of space (stretch factor 3)
         self.left_layout.addLayout(self.prog_layout, 0)  # Progress area gets minimal space
 
@@ -1469,25 +1472,55 @@ class MainWindow(QtWidgets.QMainWindow):
         pt_param_gb = GroupBox('Point style', pt_param_layout, False, False, 'pt_param_gb')
 
         # add custom plot axis limits
-        max_z_lbl = Label('Depth:', width=50, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-        max_x_lbl = Label('Width:', width=50, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        min_z_lbl = Label('Min:', width=50, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        max_z_lbl = Label('Max:', width=50, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        max_x_lbl = Label('Swath Width:', width=50, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         max_dr_lbl = Label('Data rate:', width=50, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         max_pi_lbl = Label('Ping int.:', width=50, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
 
-        self.max_z_tb = LineEdit('', 40, 20, 'max_z_tb', 'Set the maximum depth of the plot')
+        self.min_z_tb = LineEdit('', 40, 20, 'min_z_tb', 'Set the minimum depth of the plot')
+        self.min_z_tb.setValidator(QDoubleValidator(0, 15000, 2))
+        self.max_z_tb = LineEdit('4000', 40, 20, 'max_z_tb', 'Set the maximum depth of the plot')
+        # Validator will be updated dynamically to ensure max >= min
         self.max_z_tb.setValidator(QDoubleValidator(0, 15000, 2))
+        
+        # Connect validators to ensure min < max
+        def update_max_z_validator():
+            if self.min_z_tb.text():
+                try:
+                    min_val = float(self.min_z_tb.text())
+                    self.max_z_tb.setValidator(QDoubleValidator(min_val, 15000, 2))
+                except ValueError:
+                    pass
+        
+        def update_min_z_validator():
+            if self.max_z_tb.text():
+                try:
+                    max_val = float(self.max_z_tb.text())
+                    self.min_z_tb.setValidator(QDoubleValidator(0, max_val, 2))
+                except ValueError:
+                    pass
+        
+        self.min_z_tb.textChanged.connect(update_max_z_validator)
+        self.max_z_tb.textChanged.connect(update_min_z_validator)
+        
+        # Create Depth groupbox with Min and Max depth parameters
+        depth_layout = BoxLayout([min_z_lbl, self.min_z_tb, max_z_lbl, self.max_z_tb], 'h')
+        depth_gb = GroupBox('Depth', depth_layout, False, False, 'depth_plot_lim_gb')
+        
         self.max_x_tb = LineEdit('', 40, 20, 'max_x_tb', 'Set the maximum width of the plot')
         self.max_x_tb.setValidator(QDoubleValidator(0, 30000, 2))
         self.max_dr_tb = LineEdit('', 40, 20, 'max_dr_tb', 'Set the maximum data rate of the plot')
         self.max_dr_tb.setValidator(QDoubleValidator(0, np.inf, 2))
         self.max_pi_tb = LineEdit('', 40, 20, 'max_pi_tb', 'Set the maximum ping interval of the plot')
         self.max_pi_tb.setValidator(QDoubleValidator(0, np.inf, 2))
-        # plot_lim_layout = BoxLayout([max_z_lbl, self.max_z_tb, max_x_lbl, self.max_x_tb], 'h')
-        plot_lim_layout_upper = BoxLayout([max_z_lbl, self.max_z_tb, max_x_lbl, self.max_x_tb], 'h')
+        
+        # Layout: Depth groupbox at top, then Width, then Data rate and Ping int.
+        plot_lim_layout_width = BoxLayout([max_x_lbl, self.max_x_tb], 'h')
         plot_lim_layout_lower = BoxLayout([max_dr_lbl, self.max_dr_tb, max_pi_lbl, self.max_pi_tb], 'h')
-        plot_lim_layout = BoxLayout([plot_lim_layout_upper, plot_lim_layout_lower], 'v')
+        plot_lim_layout = BoxLayout([depth_gb, plot_lim_layout_width, plot_lim_layout_lower], 'v')
         self.plot_lim_gb = GroupBox('Use custom plot limits', plot_lim_layout, True, False, 'plot_lim_gb')
-        self.plot_lim_gb.setToolTip('Set maximum depth and width (0-30000 m) to override automatic plot scaling.')
+        self.plot_lim_gb.setToolTip('Set minimum and maximum depth and width (0-30000 m) to override automatic plot scaling.')
 
         # add custom swath angle limits
         min_angle_lbl = Label('Min:', width=50, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
@@ -1704,12 +1737,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.spec_chk = CheckBox('Show specification lines', False, 'show_spec_chk',
                                  'IN DEVELOPMENT: Load a text file with theoretical swath coverage performance')
 
-        self.standard_fig_size_chk = CheckBox('Save standard figure size', True, 'standard_fig_size_chk',
-                                              'Save figures in a standard size '
-                                              '(H: ' + str(self.std_fig_height_inches) + '", '
-                                              'W: ' + str(self.std_fig_width_inches) + '", 600 PPI).  Uncheck to '
-                                              'allow the saved figure size to scale with the current plotter window.')
-
         self.show_hist_chk = CheckBox('Show histogram of soundings', False, 'show_hist_chk',
                                       'Show the distribution of soundings on the swath coverage plot.')
         self.match_data_cmodes_chk = CheckBox('Apply color modes to data plots', True, 'match_data_cmodes_chk',
@@ -1725,7 +1752,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
         toggle_chk_layout = BoxLayout([self.show_ref_fil_chk, self.show_spec_legend_chk, self.grid_lines_toggle_chk, self.colorbar_chk,
-                                       self.spec_chk, self.standard_fig_size_chk, self.show_hist_chk,
+                                       self.spec_chk, self.show_hist_chk,
                                        self.match_data_cmodes_chk, self.show_coverage_trend_chk], 'v')
 
         toggle_chk_gb = GroupBox('Other options', toggle_chk_layout, False, False, 'other_options_gb')
@@ -1735,12 +1762,16 @@ class MainWindow(QtWidgets.QMainWindow):
                                BoxLayout([self.save_all_plots_btn], 'v'),
                                False, False, 'plot_btn_gb')
 
-        # Export functionality group (moved from left panel)
+        # Export functionality group (moved to left panel above Activity Log)
         export_gf_lbl = Label('Source:')
         export_gf_source = BoxLayout([export_gf_lbl, self.export_gf_cbox], 'h')
         export_horizontal_layout = BoxLayout([self.export_gf_btn, export_gf_source], 'h')
         export_btn_gb = GroupBox('Export Trend', export_horizontal_layout,
                                  False, False, 'export_btn_gb')
+        
+        # Add Export Trend groupbox to left layout above Activity Log
+        # Insert it at position 1 (after file_gb, before log_gb)
+        self.left_layout.insertWidget(1, export_btn_gb, 0)  # stretch factor 0 for minimal space
 
         # add runtime parameter search options
         param_cond_lbl = Label('Show when', 60, 20, 'param_cond_lbl', (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter))
@@ -1835,7 +1866,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # set up tab 1: plot options
         self.tab1 = QtWidgets.QWidget()
         self.tab1_layout = BoxLayout([self.custom_info_gb, self.depth_ref_gb, cmode_layout, pt_param_gb, self.plot_lim_gb,
-                                      self.angle_lines_gb, self.n_wd_lines_gb, toggle_chk_gb, plot_btn_gb, export_btn_gb], 'v')
+                                      self.angle_lines_gb, self.n_wd_lines_gb, toggle_chk_gb, plot_btn_gb], 'v')
         self.tab1_layout.addStretch()
         self.tab1.setLayout(self.tab1_layout)
 
@@ -2162,15 +2193,25 @@ class MainWindow(QtWidgets.QMainWindow):
         """Check if decimation settings have changed since last cache"""
         current_settings = {}
         
-        # Get current decimation settings
+        # Get current decimation settings for plotting (not just PKL loading)
+        if hasattr(self, 'pt_count_gb'):
+            current_settings['pt_count_enabled'] = self.pt_count_gb.isChecked()
+            if hasattr(self, 'max_count_tb'):
+                current_settings['max_count'] = self.max_count_tb.text()
+            if hasattr(self, 'dec_fac_tb'):
+                current_settings['dec_fac'] = self.dec_fac_tb.text()
+            if hasattr(self, 'n_points_max_default'):
+                current_settings['n_points_max_default'] = self.n_points_max_default
+        
+        # Also check PKL loading decimation settings
         if hasattr(self, 'swath_pkl_dec_gb') and self.swath_pkl_dec_gb.isChecked():
-            current_settings['decimation_enabled'] = True
+            current_settings['pkl_decimation_enabled'] = True
             if hasattr(self, 'swath_pkl_max_tb'):
-                current_settings['max_points'] = self.swath_pkl_max_tb.text()
+                current_settings['pkl_max_points'] = self.swath_pkl_max_tb.text()
             if hasattr(self, 'swath_pkl_dec_tb'):
-                current_settings['dec_factor'] = self.swath_pkl_dec_tb.text()
+                current_settings['pkl_dec_factor'] = self.swath_pkl_dec_tb.text()
         else:
-            current_settings['decimation_enabled'] = False
+            current_settings['pkl_decimation_enabled'] = False
         
         # Check if settings have changed
         if current_settings != self.last_decimation_settings:
@@ -2183,18 +2224,44 @@ class MainWindow(QtWidgets.QMainWindow):
         current_settings = {}
         
         # Get current filter settings - only data processing filters, not display options
-        if hasattr(self, 'min_angle_tb'):
-            current_settings['min_angle'] = self.min_angle_tb.text()
-        if hasattr(self, 'max_angle_tb'):
-            current_settings['max_angle'] = self.max_angle_tb.text()
-        if hasattr(self, 'min_depth_tb'):
-            current_settings['min_depth'] = self.min_depth_tb.text()
-        if hasattr(self, 'max_depth_tb'):
-            current_settings['max_depth'] = self.max_depth_tb.text()
-        if hasattr(self, 'min_bs_tb'):
-            current_settings['min_bs'] = self.min_bs_tb.text()
-        if hasattr(self, 'max_bs_tb'):
-            current_settings['max_bs'] = self.max_bs_tb.text()
+        if hasattr(self, 'angle_gb'):
+            current_settings['angle_enabled'] = self.angle_gb.isChecked()
+            if hasattr(self, 'min_angle_tb'):
+                current_settings['min_angle'] = self.min_angle_tb.text()
+            if hasattr(self, 'max_angle_tb'):
+                current_settings['max_angle'] = self.max_angle_tb.text()
+        
+        if hasattr(self, 'depth_gb'):
+            current_settings['depth_enabled'] = self.depth_gb.isChecked()
+            if hasattr(self, 'min_depth_tb'):
+                current_settings['min_depth'] = self.min_depth_tb.text()
+            if hasattr(self, 'max_depth_tb'):
+                current_settings['max_depth'] = self.max_depth_tb.text()
+            if hasattr(self, 'min_depth_arc_tb'):
+                current_settings['min_depth_arc'] = self.min_depth_arc_tb.text()
+            if hasattr(self, 'max_depth_arc_tb'):
+                current_settings['max_depth_arc'] = self.max_depth_arc_tb.text()
+        
+        if hasattr(self, 'bs_gb'):
+            current_settings['bs_enabled'] = self.bs_gb.isChecked()
+            if hasattr(self, 'min_bs_tb'):
+                current_settings['min_bs'] = self.min_bs_tb.text()
+            if hasattr(self, 'max_bs_tb'):
+                current_settings['max_bs'] = self.max_bs_tb.text()
+        
+        if hasattr(self, 'rtp_angle_gb'):
+            current_settings['rtp_angle_enabled'] = self.rtp_angle_gb.isChecked()
+            if hasattr(self, 'rtp_angle_buffer_tb'):
+                current_settings['rtp_angle_buffer'] = self.rtp_angle_buffer_tb.text()
+        
+        if hasattr(self, 'rtp_cov_gb'):
+            current_settings['rtp_cov_enabled'] = self.rtp_cov_gb.isChecked()
+            if hasattr(self, 'rtp_cov_buffer_tb'):
+                current_settings['rtp_cov_buffer'] = self.rtp_cov_buffer_tb.text()
+        
+        # Depth reference also affects data processing
+        if hasattr(self, 'ref_cbox'):
+            current_settings['depth_ref'] = self.ref_cbox.currentText()
         
         # Check if settings have changed
         if current_settings != self.last_filter_settings:
@@ -2208,6 +2275,50 @@ class MainWindow(QtWidgets.QMainWindow):
         self.decimation_cache_valid = False
         if hasattr(self, 'update_log'):
             self.update_log("DEBUG: Decimation cache invalidated", 'blue')
+    
+    def _generate_plot_cache_key(self, is_archive=False):
+        """Generate a cache key based on settings that affect data processing (not visual params)"""
+        key_parts = []
+        
+        # Depth reference setting affects data processing
+        if hasattr(self, 'ref_cbox'):
+            key_parts.append(f"ref:{self.ref_cbox.currentText()}")
+        
+        # Filter settings that affect which data points are included
+        if hasattr(self, 'angle_gb') and self.angle_gb.isChecked():
+            key_parts.append(f"angle:{self.min_angle_tb.text()}-{self.max_angle_tb.text()}")
+        
+        if hasattr(self, 'depth_gb') and self.depth_gb.isChecked():
+            if is_archive and hasattr(self, 'min_depth_arc_tb'):
+                key_parts.append(f"depth_arc:{self.min_depth_arc_tb.text()}-{self.max_depth_arc_tb.text()}")
+            else:
+                key_parts.append(f"depth:{self.min_depth_tb.text()}-{self.max_depth_tb.text()}")
+        
+        if hasattr(self, 'bs_gb') and self.bs_gb.isChecked():
+            key_parts.append(f"bs:{self.min_bs_tb.text()}-{self.max_bs_tb.text()}")
+        
+        if hasattr(self, 'rtp_angle_gb') and self.rtp_angle_gb.isChecked():
+            if hasattr(self, 'rtp_angle_buffer_tb'):
+                key_parts.append(f"rtp_angle:{self.rtp_angle_buffer_tb.text()}")
+        
+        if hasattr(self, 'rtp_cov_gb') and self.rtp_cov_gb.isChecked():
+            if hasattr(self, 'rtp_cov_buffer_tb'):
+                key_parts.append(f"rtp_cov:{self.rtp_cov_buffer_tb.text()}")
+        
+        # Decimation settings
+        if hasattr(self, 'pt_count_gb') and self.pt_count_gb.isChecked():
+            if hasattr(self, 'max_count_tb'):
+                key_parts.append(f"max_count:{self.max_count_tb.text()}")
+            if hasattr(self, 'dec_fac_tb'):
+                key_parts.append(f"dec_fac:{self.dec_fac_tb.text()}")
+        else:
+            if hasattr(self, 'n_points_max_default'):
+                key_parts.append(f"max_count_default:{self.n_points_max_default}")
+        
+        # Archive flag
+        key_parts.append(f"archive:{is_archive}")
+        
+        return "|".join(key_parts)
     
     def _should_use_decimation_cache(self):
         """Determine if we can use cached decimated data"""
@@ -2225,12 +2336,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._invalidate_decimation_cache()
             return False
         
-        # Only check data processing filters, not display options
-        # For now, let's be conservative and not check filter changes
-        # This prevents cache invalidation on cosmetic changes
-        # if self._check_filter_settings_changed():
-        #     self._invalidate_decimation_cache()
-        #     return False
+        # Check data processing filters
+        if self._check_filter_settings_changed():
+            self._invalidate_decimation_cache()
+            return False
         
         return True
 
