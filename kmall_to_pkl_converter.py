@@ -16,13 +16,10 @@ Features:
 Author: Paul Johnson
 """
 
-__version__ = "2025.01"  # First Release of the program
-
 import sys
 import os
 import pickle
 import gzip
-import threading
 import time
 import datetime
 from pathlib import Path
@@ -69,7 +66,7 @@ except ImportError:
         # We'll handle this gracefully in the GUI
         MULTIBEAM_TOOLS_AVAILABLE = False
 
-__version__ = "2025.1"  # first release of the program
+__version__ = "2025.01"  # First Release of the program
 
 def load_session_config():
     """Load session configuration from file"""
@@ -122,8 +119,6 @@ class ConversionWorker(QThread):
     
     def run(self):
         """Main conversion process"""
-        import time
-        
         try:
             # Start timing for the entire conversion process
             total_start_time = time.time()
@@ -136,8 +131,6 @@ class ConversionWorker(QThread):
                 'errors': []
             }
             
-            total_files = len(self.input_files)
-            
             for i, input_file in enumerate(self.input_files):
                 if self.cancelled:
                     break
@@ -146,7 +139,6 @@ class ConversionWorker(QThread):
                 self.progress_updated.emit(i, f"Converting {filename}...")
                 
                 # Start timing for this file
-                import time
                 start_time = time.time()
                 
                 try:
@@ -173,13 +165,18 @@ class ConversionWorker(QThread):
                         results['converted'] += 1
                         # Calculate size savings
                         input_size = os.path.getsize(input_file)
-                        output_size = os.path.getsize(output_file)
-                        size_saved = input_size - output_size
-                        results['total_size_saved'] += size_saved
-                        
-                        self.progress_updated.emit(i + 1, 
-                                                 f"Converted {filename} in {conversion_time:.2f}s "
-                                                 f"({input_size/(1024*1024):.1f}MB → {output_size/(1024*1024):.1f}MB)")
+                        if os.path.exists(output_file):
+                            output_size = os.path.getsize(output_file)
+                            size_saved = input_size - output_size
+                            results['total_size_saved'] += size_saved
+                            self.progress_updated.emit(i + 1, 
+                                                     f"Converted {filename} in {conversion_time:.2f}s "
+                                                     f"({input_size/(1024*1024):.1f}MB → {output_size/(1024*1024):.1f}MB)")
+                        else:
+                            # Output file wasn't created (shouldn't happen if success=True, but handle gracefully)
+                            self.progress_updated.emit(i + 1, 
+                                                     f"Converted {filename} in {conversion_time:.2f}s "
+                                                     f"({input_size/(1024*1024):.1f}MB → output file not found)")
                     else:
                         results['failed'] += 1
                         results['errors'].append(f"Failed to convert {filename}")
@@ -272,7 +269,6 @@ class ConversionWorker(QThread):
                 'z_stbd': [],
                 'bs_port': [],
                 'bs_stbd': [],
-                'fname': [],
                 'ping_mode': [],
                 'pulse_form': [],
                 'swath_mode': [],
@@ -301,7 +297,7 @@ class ConversionWorker(QThread):
         
         try:
             # Import the proper readKMALLswath function
-            from multibeam_tools.libs.swath_fun import readKMALLswath
+            from libs.swath_fun import readKMALLswath
             import os
             
             # Use the proper readKMALLswath function which handles coordinate conversion correctly
@@ -326,7 +322,7 @@ class ConversionWorker(QThread):
         
         try:
             import os
-            from multibeam_tools.libs.swath_fun import readALLswath, convertXYZ
+            from libs.swath_fun import readALLswath, convertXYZ
             
             # Use the proper readALLswath function which handles coordinate conversion correctly
             data = readALLswath(self, filename, print_updates=True, parse_outermost_only=False)
@@ -381,7 +377,8 @@ class ConversionWorker(QThread):
                     # Replicate sortDetectionsCoverage functionality to create the exact structure
                     # that the plotter expects in its PKL files
                     det_key_list = ['fname', 'model', 'datetime', 'date', 'time', 'sn',
-                                  'y_port', 'y_stbd', 'z_port', 'z_stbd', 'bs_port', 'bs_stbd', 'rx_angle_port', 'rx_angle_stbd',
+                                  'y_port', 'y_stbd', 'z_port', 'z_stbd', 'bs_port', 'bs_stbd', 
+                                  'rx_angle_port', 'rx_angle_stbd',
                                   'ping_mode', 'pulse_form', 'swath_mode', 'frequency',
                                   'max_port_deg', 'max_stbd_deg', 'max_port_m', 'max_stbd_m',
                                   'tx_x_m', 'tx_y_m', 'tx_z_m', 'tx_r_deg', 'tx_p_deg', 'tx_h_deg',
@@ -513,41 +510,41 @@ class ConversionWorker(QThread):
                             }
                             optimized_data['XYZ'].append(minimal_xyz)
                     
-                            # Add essential HDR data required by interpretMode function (one per ping)
-                            optimized_data['HDR'] = []
-                            if 'HDR' in data and len(data['HDR']) > 0:
-                                for hdr_entry in data['HDR']:
-                                    minimal_hdr = {
-                                        'echoSounderID': hdr_entry.get('echoSounderID', 712),
-                                        'dgdatetime': hdr_entry.get('dgdatetime', datetime.datetime.now())
-                                    }
-                                    optimized_data['HDR'].append(minimal_hdr)
-                            else:
-                                # Create HDR data with one entry per ping
-                                for _ in range(len(xyz_data)):
-                                    minimal_hdr = {
-                                        'echoSounderID': 712,
-                                        'dgdatetime': datetime.datetime.now()
-                                    }
-                                    optimized_data['HDR'].append(minimal_hdr)
-                            
-                            # Add essential RTP data required by interpretMode function (one per ping)
-                            optimized_data['RTP'] = []
-                            if 'RTP' in data and len(data['RTP']) > 0:
-                                for rtp_entry in data['RTP']:
-                                    minimal_rtp = {
-                                        'depthMode': rtp_entry.get('depthMode', 0),
-                                        'pulseForm': rtp_entry.get('pulseForm', 0)
-                                    }
-                                    optimized_data['RTP'].append(minimal_rtp)
-                            else:
-                                # Create RTP data with one entry per ping
-                                for _ in range(len(xyz_data)):
-                                    minimal_rtp = {
-                                        'depthMode': 0,
-                                        'pulseForm': 0
-                                    }
-                                    optimized_data['RTP'].append(minimal_rtp)
+                    # Add essential HDR data required by interpretMode function (one per ping)
+                    optimized_data['HDR'] = []
+                    if 'HDR' in data and len(data['HDR']) > 0:
+                        for hdr_entry in data['HDR']:
+                            minimal_hdr = {
+                                'echoSounderID': hdr_entry.get('echoSounderID', 712),
+                                'dgdatetime': hdr_entry.get('dgdatetime', datetime.datetime.now())
+                            }
+                            optimized_data['HDR'].append(minimal_hdr)
+                    else:
+                        # Create HDR data with one entry per ping
+                        for _ in range(len(xyz_data)):
+                            minimal_hdr = {
+                                'echoSounderID': 712,
+                                'dgdatetime': datetime.datetime.now()
+                            }
+                            optimized_data['HDR'].append(minimal_hdr)
+                    
+                    # Add essential RTP data required by interpretMode function (one per ping)
+                    optimized_data['RTP'] = []
+                    if 'RTP' in data and len(data['RTP']) > 0:
+                        for rtp_entry in data['RTP']:
+                            minimal_rtp = {
+                                'depthMode': rtp_entry.get('depthMode', 0),
+                                'pulseForm': rtp_entry.get('pulseForm', 0)
+                            }
+                            optimized_data['RTP'].append(minimal_rtp)
+                    else:
+                        # Create RTP data with one entry per ping
+                        for _ in range(len(xyz_data)):
+                            minimal_rtp = {
+                                'depthMode': 0,
+                                'pulseForm': 0
+                            }
+                            optimized_data['RTP'].append(minimal_rtp)
                     
                     # Add essential IP data required by sortDetectionsCoverage
                     if 'IP' in data:
