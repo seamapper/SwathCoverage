@@ -20,6 +20,7 @@ A standalone GUI application that converts Kongsberg multibeam data files (KMALL
 #### Key Features
 - **Simple GUI Interface**: Easy-to-use graphical interface for file selection and conversion
 - **Batch Processing**: Convert multiple files at once
+- **Directory Support**: Add entire directories with optional recursive subdirectory search
 - **Progress Tracking**: Real-time progress bar and status updates
 - **Compression Support**: Optional gzip compression for 30-70% smaller files
 - **Error Handling**: Comprehensive error reporting and logging
@@ -34,12 +35,15 @@ python kmall_to_pkl_converter.py
 
 **Method 2: Windows Executable**
 ```bash
-KMALL_to_SwathPKL_V2025.01.exe
+KMALL to SwathPKL Converter V2025.02.exe
 ```
 
 **Basic Workflow:**
 1. Launch the application
-2. Click "Select KMALL/ALL Files" and choose one or more files
+2. Add files using one of the following methods:
+   - Click "Select KMALL/ALL Files" to choose individual files
+   - Click "Select Directory" to add all KMALL/ALL files from a directory
+   - Enable "Include Subdirectories" checkbox to recursively search subdirectories
 3. Choose an output directory for the converted PKL files
 4. Optionally enable compression for smaller file sizes
 5. Click "Start Conversion" and monitor progress
@@ -69,7 +73,7 @@ python swath_coverage_plotter.py
 
 **Method 2: Windows Executable**
 ```bash
-SwathCoveragePlotter_V2025.11.exe
+Swath Coverage Plotter V2025.11.exe
 ```
 
 **Basic Workflow:**
@@ -266,6 +270,9 @@ If you encounter issues:
 - **v2025.02**: New features, new swath PKL, GUI redesign
 
 ### KMALL to PKL Converter
+- **v2025.02**: Added subdirectory search option
+  - Added checkbox to include subdirectories when adding a directory
+  - Updated executable naming format
 - **v2025.01**: Initial release
   - GUI interface
   - Batch processing
@@ -307,4 +314,7 @@ For questions, issues, or contributions:
 - **Email**: kjerram@ccom.unh.edu, pjohnson@ccom.unh.edu
 - **Repository**: https://github.com/seamapper/SwathCoverage
 - **Issues**: https://github.com/seamapper/SwathCoverage/issues
+
+
+
 

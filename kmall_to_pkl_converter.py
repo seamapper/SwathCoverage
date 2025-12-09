@@ -15,6 +15,8 @@ Features:
 
 Author: Paul Johnson
 """
+# __version__ = "2025.01"  # First Release of the program
+__version__ = "2025.02"  # Added subdirectory search option
 
 import sys
 import os
@@ -55,7 +57,6 @@ except ImportError as e:
     # We'll handle this gracefully in the GUI
     MULTIBEAM_TOOLS_AVAILABLE = False
 
-__version__ = "2025.01"  # First Release of the program
 
 def load_session_config():
     """Load session configuration from file"""
@@ -70,7 +71,8 @@ def load_session_config():
     default_config = {
         'last_input_dir': '',
         'last_output_dir': '',
-        'last_compression_setting': True
+        'last_compression_setting': True,
+        'last_include_subdirs_setting': False
     }
     
     try:
@@ -728,6 +730,12 @@ class KMALLToPKLConverter(QMainWindow):
         self.overwrite_checkbox.setChecked(last_overwrite)
         options_layout.addWidget(self.overwrite_checkbox)
         
+        self.include_subdirs_checkbox = QCheckBox("Include Subdirectories When Adding A Directory")
+        # Load last include subdirs setting (default to False)
+        last_include_subdirs = self.session_config.get('last_include_subdirs_setting', False)
+        self.include_subdirs_checkbox.setChecked(last_include_subdirs)
+        options_layout.addWidget(self.include_subdirs_checkbox)
+        
         main_layout.addWidget(options_group)
         
         # Progress group
@@ -785,6 +793,7 @@ class KMALLToPKLConverter(QMainWindow):
         self.cancel_btn.clicked.connect(self.cancel_conversion)
         self.compression_checkbox.stateChanged.connect(self.save_compression_setting)
         self.overwrite_checkbox.stateChanged.connect(self.save_overwrite_setting)
+        self.include_subdirs_checkbox.stateChanged.connect(self.save_include_subdirs_setting)
         self.clear_config_btn.clicked.connect(self.clear_session_config)
     
     def select_input_files(self):
@@ -828,15 +837,30 @@ class KMALLToPKLConverter(QMainWindow):
         )
         
         if directory:
+            # Check if subdirectories should be included
+            include_subdirs = self.include_subdirs_checkbox.isChecked()
+            
             # Find all KMALL and ALL files in the directory
             kmall_files = []
             all_files = []
             
-            for filename in os.listdir(directory):
-                if filename.lower().endswith('.kmall'):
-                    kmall_files.append(os.path.join(directory, filename))
-                elif filename.lower().endswith('.all'):
-                    all_files.append(os.path.join(directory, filename))
+            if include_subdirs:
+                # Recursively search subdirectories
+                for root, dirs, files in os.walk(directory):
+                    for filename in files:
+                        if filename.lower().endswith('.kmall'):
+                            kmall_files.append(os.path.join(root, filename))
+                        elif filename.lower().endswith('.all'):
+                            all_files.append(os.path.join(root, filename))
+            else:
+                # Only search the selected directory (original behavior)
+                for filename in os.listdir(directory):
+                    filepath = os.path.join(directory, filename)
+                    if os.path.isfile(filepath):
+                        if filename.lower().endswith('.kmall'):
+                            kmall_files.append(filepath)
+                        elif filename.lower().endswith('.all'):
+                            all_files.append(filepath)
             
             # Combine and sort the files
             all_input_files = sorted(kmall_files + all_files)
@@ -844,7 +868,8 @@ class KMALLToPKLConverter(QMainWindow):
             if all_input_files:
                 self.input_files = all_input_files
                 file_count = len(all_input_files)
-                self.input_label.setText(f"{file_count} files from directory: {os.path.basename(directory)}")
+                search_type = "directory and subdirectories" if include_subdirs else "directory"
+                self.input_label.setText(f"{file_count} files from {search_type}: {os.path.basename(directory)}")
                 
                 # Remember the directory
                 self.last_input_dir = directory
@@ -852,13 +877,16 @@ class KMALLToPKLConverter(QMainWindow):
                 save_session_config(self.session_config)
                 
                 self.log_message(f"Selected directory: {directory}")
+                if include_subdirs:
+                    self.log_message("Searching subdirectories recursively...")
                 self.log_message(f"Found {len(kmall_files)} KMALL files and {len(all_files)} ALL files")
                 self.log_message(f"Total: {file_count} file(s) for conversion")
                 self.update_convert_button_state()
             else:
-                self.log_message(f"No KMALL or ALL files found in directory: {directory}")
+                search_type = "directory and subdirectories" if include_subdirs else "directory"
+                self.log_message(f"No KMALL or ALL files found in {search_type}: {directory}")
                 QMessageBox.information(self, "No Files Found", 
-                                      f"No KMALL or ALL files found in the selected directory:\n{directory}")
+                                      f"No KMALL or ALL files found in the selected {search_type}:\n{directory}")
     
     def select_output_directory(self):
         """Select output directory for PKL files"""
@@ -896,6 +924,11 @@ class KMALLToPKLConverter(QMainWindow):
     def save_overwrite_setting(self):
         """Save the overwrite setting to session config"""
         self.session_config['last_overwrite_setting'] = self.overwrite_checkbox.isChecked()
+        save_session_config(self.session_config)
+    
+    def save_include_subdirs_setting(self):
+        """Save the include subdirectories setting to session config"""
+        self.session_config['last_include_subdirs_setting'] = self.include_subdirs_checkbox.isChecked()
         save_session_config(self.session_config)
     
     def start_conversion(self):
@@ -1024,7 +1057,8 @@ class KMALLToPKLConverter(QMainWindow):
             self.session_config = {
                 'last_input_dir': '',
                 'last_output_dir': '',
-                'last_compression_setting': True
+                'last_compression_setting': True,
+                'last_include_subdirs_setting': False
             }
             self.last_input_dir = ''
             self.last_output_dir = ''
@@ -1035,6 +1069,7 @@ class KMALLToPKLConverter(QMainWindow):
             self.input_label.setText("No files selected")
             self.output_label.setText("No output directory selected")
             self.compression_checkbox.setChecked(True)
+            self.include_subdirs_checkbox.setChecked(False)
             self.update_convert_button_state()
             
             self.log_message("Session configuration cleared - settings reset to defaults")

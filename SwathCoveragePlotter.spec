@@ -4,9 +4,9 @@ import os
 import re
 
 # Get version from the main script dynamically
-version = "2025.02"  # Default fallback
+version = "2025.11"  # Default fallback
 try:
-    with open('kmall_to_pkl_converter.py', 'r', encoding='utf-8') as f:
+    with open('swath_coverage_plotter.py', 'r', encoding='utf-8') as f:
         content = f.read()
         # Match __version__ that is not commented out (not preceded by #)
         # Look for lines that don't start with # or have # after the version assignment
@@ -24,16 +24,20 @@ except Exception:
     pass  # Use default version if reading fails
 
 a = Analysis(
-    ['kmall_to_pkl_converter.py'],
+    ['swath_coverage_plotter.py'],
     pathex=[],
     binaries=[],
     datas=[
         ('libs', 'libs'),  # Include the libs folder
+        ('media', 'media'),  # Include the media folder
     ],
     hiddenimports=[
         'libs.swath_fun',
+        'libs.swath_coverage_lib',
         'libs.kmall',
         'libs.parseEM',
+        'libs.file_fun',
+        'libs.gui_widgets',
         'PyQt6.QtCore',
         'PyQt6.QtGui',
         'PyQt6.QtWidgets',
@@ -55,7 +59,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name=f'KMALL to SwathPKL Converter V{version}',
+    name=f'Swath Coverage Plotter V{version}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -70,3 +74,4 @@ exe = EXE(
     entitlements_file=None,
     icon=os.path.join('media', 'CCOM.ico') if os.path.exists(os.path.join('media', 'CCOM.ico')) else None,
 )
+
