@@ -3085,7 +3085,13 @@ def load_archive(self):
                 self.archive_filenames.append(archive_file)
                 # Add to archive file list widget if it exists
                 if hasattr(self, 'archive_file_list'):
-                    self.archive_file_list.addItem(fname_str)
+                    if getattr(self, 'show_archive_path_chk', None) and self.show_archive_path_chk.isChecked():
+                        display_text = archive_file
+                    else:
+                        display_text = fname_str
+                    self.archive_file_list.addItem(display_text)
+                    if hasattr(self, 'original_archive_paths'):
+                        self.original_archive_paths[self.archive_file_list.count() - 1] = archive_file
         except Exception as e:
             update_log(self, f'Failed to load archive {fname_str}: {str(e)}')
 

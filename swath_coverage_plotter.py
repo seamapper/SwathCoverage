@@ -25,6 +25,19 @@ Key Features:
 - Multiple plot types and export options
 - Interactive data exploration tools
 """
+# Version tracking for the application
+# __version__ = "0.2.4"  # added EM2042 support, using old version of kmall.py from Seabream
+#__version__ = "999999"  # EM2042 example from Tony + transition to POLLACK / Python 3.10
+# __version__ = "2025.02"  # New features, new swath PKL, GUI redesign
+# __version__ = "2025.03"  # Fixed some issues with the swath coverage plotter
+# __version__ = "2025.05"  # Fixed frequency plot export size and text field styling
+# __version__ = "2025.06"  # Fixed issue with loading new PKL files, added loading directory
+# __version__ = "2025.07"  # Improved swatch coverage curve specification plotting 
+# __version__ = "2025.08"  # Enhanced theoretical performance plotting 
+# __version__ = "2025.09"  # GUI improvements, Fixed Plots Scaling
+# __version__ = "2025.10"  # Reorganized sources area into tabs   
+# __version__ = "2025.11"  # Fixed plot decimation to only run when filter settings are changed
+__version__ = "2025.12"  # Fixed layout for swath pkl and archive pkl management
 
 # BSD-3-Clause License
 #
@@ -65,6 +78,8 @@ import sys
 import time
 import datetime
 import os
+import pickle
+import gzip
 import traceback
 
 # Third-party imports for plotting and GUI
@@ -79,18 +94,6 @@ except ImportError:
 import matplotlib.pyplot as plt
 
 
-# Version tracking for the application
-# __version__ = "0.2.4"  # added EM2042 support, using old version of kmall.py from Seabream
-#__version__ = "999999"  # EM2042 example from Tony + transition to POLLACK / Python 3.10
-# __version__ = "2025.02"  # New features, new swath PKL, GUI redesign
-# __version__ = "2025.03"  # Fixed some issues with the swath coverage plotter
-# __version__ = "2025.05"  # Fixed frequency plot export size and text field styling
-# __version__ = "2025.06"  # Fixed issue with loading new PKL files, added loading directory
-# __version__ = "2025.07"  # Improved swatch coverage curve specification plotting 
-#__version__ = "2025.08"  # Enhanced theoretical performance plotting 
-# __version__ = "2025.09"  # GUI improvements, Fixed Plots Scaling
-# __version__ = "2025.10"  # Reorganized sources area into tabs   
-__version__ = "2025.11"  # Fixed plot decimation to only run when filter settings are changed
 
 class MainWindow(QtWidgets.QMainWindow):
     """
@@ -295,6 +298,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Data management buttons
         self.archive_data_btn.clicked.connect(lambda: archive_data(self))
         self.load_archive_btn.clicked.connect(lambda: load_archive(self))
+        self.load_archive_dir_btn.clicked.connect(self.add_archive_files_from_directory)
         self.remove_archive_btn.clicked.connect(self.remove_selected_archive_files)
         self.clear_archive_btn.clicked.connect(self.clear_all_archive_files)
         self.remove_swath_pkl_btn.clicked.connect(self.remove_selected_swath_pkl_files)
@@ -684,7 +688,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Create file management buttons with tooltips
         self.add_file_btn = PushButton('Add Files', btnw, btnh, 'add_file_btn', 'Add files')
         self.get_indir_btn = PushButton('Add Directory', btnw, btnh, 'get_indir_btn', 'Add a directory')
-        self.include_subdir_chk = CheckBox('Incl. subfolders', False, 'include_subdir_chk',
+        self.include_subdir_chk = CheckBox('Include Subdirectories', False, 'include_subdir_chk',
                                            'Include subdirectories when adding a directory')
 
         # File removal and data management buttons
@@ -701,7 +705,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.load_swath_pkl_btn = PushButton('Add PKL Files', btnw, btnh, 'load_swath_pkl_btn',
                                              'Load pickle files as swath data (faster than source files)')
         self.get_pkl_dir_btn = PushButton('Add Directory', btnw, btnh, 'get_pkl_dir_btn', 'Add a directory of PKL files')
-        self.include_pkl_subdir_chk = CheckBox('Incl. subfolders', False, 'include_pkl_subdir_chk',
+        self.include_pkl_subdir_chk = CheckBox('Include Subdirectories', False, 'include_pkl_subdir_chk',
                                                'Include subdirectories when adding a directory of PKL files')
         self.convert_pickle_btn = PushButton('Convert to Swath PKL', btnw, btnh, 'convert_pickle_btn',
                                              'Convert source files to optimized pickle files for faster loading')
@@ -748,6 +752,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.archive_file_list = FileList()  # add archive file list with extended selection capabilities
         self.archive_file_list.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding, QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        self.original_archive_paths = {}
         
         self.spec_file_list = FileList()  # add specification curves file list with extended selection capabilities
         self.spec_file_list.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding, QtWidgets.QSizePolicy.Policy.MinimumExpanding)
@@ -838,12 +843,28 @@ class MainWindow(QtWidgets.QMainWindow):
         archive_data_widget = QtWidgets.QWidget()
         archive_data_layout = QtWidgets.QVBoxLayout()
         
-        # Archive data buttons
-        archive_btn_layout = BoxLayout([self.load_archive_btn, self.remove_archive_btn, self.clear_archive_btn], 'v')
+        # Archive data buttons: Add Archive, Remove Selected, Add Directory, Remove All, include subdirectories toggle
+        self.load_archive_dir_btn = PushButton('Add Directory', btnw, btnh, 'load_archive_dir_btn',
+                                               'Add all archive PKL files from a directory')
+        self.include_archive_subdir_chk = CheckBox('Include Subdirectories', False, 'include_archive_subdir_chk',
+                                                   'Include subdirectories when adding archive PKL files from a directory')
+        
+        archive_btn_row1 = BoxLayout([self.load_archive_btn, self.remove_archive_btn], 'h')
+        archive_btn_row2 = BoxLayout([self.load_archive_dir_btn, self.clear_archive_btn], 'h')
+        archive_btn_row3 = BoxLayout([self.include_archive_subdir_chk], 'h')
+        archive_btn_layout = BoxLayout([archive_btn_row1, archive_btn_row2, archive_btn_row3], 'v')
         archive_btn_gb = GroupBox('Archive PKL Management', archive_btn_layout, False, False, 'archive_btn_gb')
         
         # Archive data file list
-        archive_data_list_gb = GroupBox('Archive PKL Sources', BoxLayout([self.archive_file_list], 'v'), False, False, 'archive_data_list_gb')
+        self.show_archive_path_chk = CheckBox('Show Path', False, 'show_archive_path_chk',
+                                              'Show full file path along with filename in the archive PKL file list')
+        archive_sources_layout = QtWidgets.QVBoxLayout()
+        archive_sources_layout.addWidget(self.archive_file_list)
+        archive_sources_layout.addWidget(self.show_archive_path_chk)
+        archive_data_list_gb = GroupBox('Archive PKL Sources', archive_sources_layout, False, False, 'archive_data_list_gb')
+        
+        # Connect archive show path checkbox after creation
+        self.show_archive_path_chk.toggled.connect(self.toggle_archive_path_display)
         
         # Combine archive data components
         archive_data_layout.addWidget(archive_data_list_gb, 1)  # Stretch factor 1 to fill available space
@@ -1005,6 +1026,36 @@ class MainWindow(QtWidgets.QMainWindow):
                     filename = os.path.basename(original_path)
                     item.setText(filename)
 
+    def toggle_archive_path_display(self):
+        """
+        Toggle the display of file paths in the Archive PKL file list based on the show path checkbox.
+        """
+        show_path = self.show_archive_path_chk.isChecked()
+        
+        # Update each item in the archive file list
+        for i in range(self.archive_file_list.count()):
+            item = self.archive_file_list.item(i)
+            if item:
+                current_text = item.text()
+                
+                # Store the original path if not already stored
+                if i not in self.original_archive_paths:
+                    # If we don't have the original path stored, try to map from archive_filenames
+                    if hasattr(self, 'archive_filenames') and i < len(self.archive_filenames):
+                        self.original_archive_paths[i] = self.archive_filenames[i]
+                    else:
+                        self.original_archive_paths[i] = current_text
+                
+                if show_path:
+                    original_path = self.original_archive_paths.get(i, current_text)
+                    # Show full path
+                    item.setText(original_path)
+                else:
+                    # Show only filename
+                    original_path = self.original_archive_paths.get(i, current_text)
+                    filename = os.path.basename(original_path)
+                    item.setText(filename)
+
     def store_swath_pkl_original_path(self, item):
         """
         Store the original path when a new item is added to the Swath PKL file list.
@@ -1067,6 +1118,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.update_log(f"Removed {len(removed_files)} archive file(s): {', '.join(removed_files)}")
             # Update button states and refresh plot if needed
             self.update_file_buttons()
+            # Rebuild original archive path mapping after removals
+            self.original_archive_paths = {}
+            for idx in range(self.archive_file_list.count()):
+                if hasattr(self, 'archive_filenames') and idx < len(self.archive_filenames):
+                    self.original_archive_paths[idx] = self.archive_filenames[idx]
             if hasattr(self, 'refresh_plot'):
                 refresh_plot(self, call_source='remove_archive_files')
 
@@ -1081,6 +1137,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.det_archive = {}
         self.archive_filenames = []
         self.show_data_chk_arc.setChecked(False)
+        self.original_archive_paths = {}
         
         self.update_log("Cleared all archive files")
         # Update button states and refresh plot if needed
@@ -1997,8 +2054,12 @@ class MainWindow(QtWidgets.QMainWindow):
                                 break
                         
                         if not already_exists:
-                            self.swath_pkl_file_list.addItem(pkl_file)
                             # Store the original path for path display toggle
+                            # Check if "Show Path" checkbox is enabled to determine what to display
+                            show_path = self.show_swath_pkl_path_chk.isChecked()
+                            display_text = pkl_file if show_path else os.path.basename(pkl_file)
+                            
+                            self.swath_pkl_file_list.addItem(display_text)
                             item_index = self.swath_pkl_file_list.count() - 1
                             self.original_swath_pkl_paths[item_index] = pkl_file
                             newly_added_files.append(pkl_file)
@@ -2016,6 +2077,84 @@ class MainWindow(QtWidgets.QMainWindow):
                     
         except Exception as e:
             self.update_log(f"Error adding PKL files from directory: {str(e)}")
+
+    def add_archive_files_from_directory(self):
+        """Add archive PKL files from a selected directory"""
+        try:
+            # Get the last used archive directory from session config
+            config = load_session_config()
+            last_dir = config.get("last_archive_dir", os.getcwd())
+            
+            # Open directory dialog
+            selected_dir = QtWidgets.QFileDialog.getExistingDirectory(self, 'Add Archive PKL Directory', last_dir)
+            if selected_dir:
+                update_last_directory("last_archive_dir", selected_dir)
+                
+                # Get the include subfolders setting
+                include_subdir = self.include_archive_subdir_chk.isChecked()
+                
+                # Find all PKL files in the directory
+                archive_files = []
+                if include_subdir:
+                    # Walk through all subdirectories
+                    for dirpath, dirnames, filenames in os.walk(selected_dir):
+                        for filename in filenames:
+                            if filename.lower().endswith('.pkl'):
+                                archive_files.append(os.path.join(dirpath, filename))
+                else:
+                    # Only look in the selected directory
+                    for filename in os.listdir(selected_dir):
+                        if filename.lower().endswith('.pkl'):
+                            archive_files.append(os.path.join(selected_dir, filename))
+                
+                # Only load files not already in archive_filenames
+                existing_archives = getattr(self, 'archive_filenames', [])
+                new_archive_files = [f for f in archive_files if f not in existing_archives]
+                
+                if not new_archive_files:
+                    self.update_log("No new archive files to load.")
+                    return
+                
+                # Ensure tracking structures exist
+                if not hasattr(self, 'det_archive'):
+                    self.det_archive = {}
+                if not hasattr(self, 'archive_filenames'):
+                    self.archive_filenames = []
+                
+                # Load each archive file (mirror logic from load_archive)
+                for archive_file in new_archive_files:
+                    fname_str = os.path.basename(archive_file)
+                    try:
+                        try:
+                            with gzip.open(archive_file, 'rb') as f_handle:
+                                det_archive_new = pickle.load(f_handle)
+                            compression_info = " (compressed)"
+                        except (OSError, gzip.BadGzipFile):
+                            with open(archive_file, 'rb') as f_handle:
+                                det_archive_new = pickle.load(f_handle)
+                            compression_info = " (uncompressed)"
+                        self.det_archive[fname_str] = det_archive_new
+                        self.update_log(f'Loaded archive {fname_str}{compression_info}')
+                        if archive_file not in self.archive_filenames:
+                            self.archive_filenames.append(archive_file)
+                            if hasattr(self, 'archive_file_list'):
+                                # Respect show path checkbox when adding
+                                display_text = archive_file if getattr(self, 'show_archive_path_chk', None) and self.show_archive_path_chk.isChecked() else fname_str
+                                self.archive_file_list.addItem(display_text)
+                                self.original_archive_paths[self.archive_file_list.count() - 1] = archive_file
+                    except Exception as e:
+                        self.update_log(f'Failed to load archive {fname_str}: {str(e)}')
+                
+                update_button_states(self)
+                if hasattr(self, 'update_save_plots_button_color'):
+                    self.update_save_plots_button_color()
+                if not self.show_data_chk_arc.isChecked():
+                    self.show_data_chk_arc.setChecked(True)
+                else:
+                    refresh_plot(self)
+        
+        except Exception as e:
+            self.update_log(f"Error adding archive PKL files from directory: {str(e)}")
 
     def load_new_pkl_files(self, pkl_files):
         """Load only the newly added PKL files"""

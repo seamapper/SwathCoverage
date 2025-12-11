@@ -75,3 +75,5 @@ exe = EXE(
     icon=os.path.join('media', 'CCOM.ico') if os.path.exists(os.path.join('media', 'CCOM.ico')) else None,
 )
 
+
+
