@@ -69,7 +69,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=os.path.join('media', 'CCOM.ico') if os.path.exists(os.path.join('media', 'CCOM.ico')) else None,
+    icon=os.path.join('media', 'mac.ico') if os.path.exists(os.path.join('media', 'mac.ico')) else None,
 )
 
 
