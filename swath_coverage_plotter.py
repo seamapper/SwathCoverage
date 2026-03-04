@@ -157,7 +157,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Load last directories from configuration for different operations
         # This provides session persistence for user convenience
         try:
-            from swath_coverage_lib import load_session_config
+            from libs.swath_coverage_lib import load_session_config
             config = load_session_config()
             self.plot_save_dir = config.get("last_plot_save_dir", os.getcwd())
             self.archive_save_dir = config.get("last_archive_save_dir", os.getcwd())

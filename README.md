@@ -18,7 +18,7 @@ This toolkit consists of two complementary applications:
 A standalone GUI application that converts Kongsberg multibeam data files (KMALL and ALL formats) to optimized PKL (pickle) files for faster loading and processing in the Swath Coverage Plotter.
 
 #### Key Features
-- **Simple GUI Interface**: Easy-to-use graphical interface for file selection and conversion
+- **Simple GUI Interface**: Easy-to-use graphical interface for file selection and conversion (Fusion dark theme)
 - **Batch Processing**: Convert multiple files at once
 - **Directory Support**: Add entire directories with optional recursive subdirectory search
 - **Progress Tracking**: Real-time progress bar and status updates
@@ -35,8 +35,9 @@ python kmall_to_pkl_converter.py
 
 **Method 2: Windows Executable**
 ```bash
-KMALL to SwathPKL Converter V2025.02.exe
+KMALL_to_SwathPKL_Converter_v2026.01.exe
 ```
+Executables are named `KMALL_to_SwathPKL_Converter_v` + version from the code.
 
 **Basic Workflow:**
 1. Launch the application
@@ -53,16 +54,17 @@ KMALL to SwathPKL Converter V2025.02.exe
 A comprehensive GUI application for analyzing and visualizing multibeam echosounder data with extensive plotting and analysis capabilities.
 
 #### Key Features
-- **Multiple Data Sources**: Load raw KMALL/ALL files, Swath PKL files, or archived data
+- **Multiple Data Sources**: Load raw KMALL/ALL files, Swath PKL files, or archived data (with optional Add Directory and Include Subdirectories for Swath PKL and Archive PKL; Show Path toggles for file lists)
 - **Comprehensive Plotting**: Generate plots for depth, backscatter, ping mode, pulse form, swath mode, frequency, data rate, and timing
 - **Interactive Visualization**: Hover over data points to see file information
 - **Coverage Analysis**: Calculate and visualize swath coverage trends
 - **Data Filtering**: Filter by angle, depth, backscatter, ping interval, and runtime parameters
-- **Archive Management**: Archive processed data for later comparison
-- **Export Functionality**: Export plots and coverage trends (e.g., for Gap Filler)
+- **Archive Management**: Archive processed data for later comparison; add archive PKL from directory with optional subdirectory search
+- **Export Functionality**: Export plots (Export Plots) and coverage trends (e.g., for Gap Filler)
 - **Parameter Search**: Search acquisition parameters by mode, frequency, angles, and more
 - **Theoretical Performance**: Overlay theoretical coverage specification curves
 - **Session Persistence**: Remember directory preferences and settings
+- **Dark Theme**: Fusion style with dark palette for consistent GUI appearance regardless of system theme
 
 #### Usage
 
@@ -73,8 +75,9 @@ python swath_coverage_plotter.py
 
 **Method 2: Windows Executable**
 ```bash
-Swath Coverage Plotter V2025.11.exe
+Swath_Coverage_Plotter_v2026.01.exe
 ```
+Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 
 **Basic Workflow:**
 1. Launch the application
@@ -259,6 +262,8 @@ If you encounter issues:
 ## Version History
 
 ### Swath Coverage Plotter
+- **v2026.01**: Dark theme (Fusion + dark palette), Export Plots groupbox moved to left panel, Archive PKL Add Directory and Include Subdirectories, Show Path for archive list, layout and naming updates
+- **v2025.12**: Fixed layout for Swath PKL and Archive PKL management; Export Plots groupbox; relabel "Include Subdirectories"
 - **v2025.11**: Fixed plot decimation to only run when filter settings are changed
 - **v2025.10**: Reorganized sources area into tabs
 - **v2025.09**: GUI improvements, Fixed Plots Scaling
@@ -270,9 +275,8 @@ If you encounter issues:
 - **v2025.02**: New features, new swath PKL, GUI redesign
 
 ### KMALL to PKL Converter
-- **v2025.02**: Added subdirectory search option
-  - Added checkbox to include subdirectories when adding a directory
-  - Updated executable naming format
+- **v2026.01**: Dark theme (Fusion + dark palette); executable naming `KMALL_to_SwathPKL_Converter_v` + version
+- **v2025.02**: Added subdirectory search option; checkbox to include subdirectories when adding a directory
 - **v2025.01**: Initial release
   - GUI interface
   - Batch processing

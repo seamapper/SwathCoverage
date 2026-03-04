@@ -4,12 +4,15 @@ A standalone GUI application to convert KMALL and ALL files to optimized PKL fil
 
 ## Features
 
-- **Simple GUI Interface**: Easy-to-use graphical interface for file selection and conversion
+- **Simple GUI Interface**: Easy-to-use graphical interface (Fusion dark theme) for file selection and conversion
 - **Batch Processing**: Convert multiple files at once
+- **Directory Support**: Add entire directories; optional "Include Subdirectories" to search recursively
 - **Progress Tracking**: Real-time progress bar and status updates
 - **Compression Support**: Optional gzip compression for 30-70% smaller files
+- **Overwrite Option**: Option to overwrite existing PKL files
 - **Error Handling**: Comprehensive error reporting and logging
-- **File Validation**: Automatic detection of up-to-date files (skip if newer)
+- **File Validation**: Automatic detection of up-to-date files (skip if newer when overwrite is off)
+- **Session Persistence**: Remembers last directories and settings; "Clear Settings" to reset
 
 ## Requirements
 
@@ -24,32 +27,31 @@ A standalone GUI application to convert KMALL and ALL files to optimized PKL fil
 - utm (UTM coordinate conversions)
 
 ### Multibeam Tools Libraries
-The converter requires the multibeam_tools libraries from the main MultibeamToolsAI project:
+The converter uses the `libs` folder in the same directory as the script:
 - `swath_fun.py`
-- `swath_coverage_lib.py`
 - `kmall.py`
 - `parseEM.py`
-- `file_fun.py`
+(Other libs may be pulled in as dependencies.)
 
 ## Installation
 
 ### 1. Install Python Dependencies
 ```bash
-pip install -r converter_requirements.txt
+pip install PyQt6 numpy scipy
 ```
+(Optional: `pip install pyinstaller` if you plan to build the Windows executable.)
 
 ### 2. Verify Directory Structure
-Ensure the MultibeamToolsAI directory structure is correct:
+Ensure the project structure includes the `libs` folder:
 ```
-MultibeamToolsAI/
-├── multibeam_tools/
-│   └── libs/
-│       ├── swath_fun.py
-│       ├── swath_coverage_lib.py
-│       ├── kmall.py
-│       ├── parseEM.py
-│       └── file_fun.py
-└── kmall_to_pkl_converter.py
+SwathCoverage/
+├── libs/
+│   ├── swath_fun.py
+│   ├── kmall.py
+│   ├── parseEM.py
+│   └── ...
+├── kmall_to_pkl_converter.py
+└── ...
 ```
 
 ## Usage
@@ -59,37 +61,38 @@ MultibeamToolsAI/
 python kmall_to_pkl_converter.py
 ```
 
-### Method 2: Windows Batch File
+### Method 2: Windows Executable
 ```bash
-run_converter.bat
+KMALL_to_SwathPKL_Converter_v2026.01.exe
 ```
+Executables are named `KMALL_to_SwathPKL_Converter_v` + version (from the script). Build with (run from the project directory):
+```bash
+pyinstaller KMALL_to_PKL_Converter.spec --clean
+```
+Or run the project’s `build_exe.ps1` script to build the converter executable.
 
 ## How to Use
 
 1. **Launch the Application**
-   - Run the converter using one of the methods above
+   - Run the converter via script or the built executable.
 
 2. **Select Input Files**
-   - Click "Select KMALL/ALL Files"
-   - Choose one or more .kmall or .all files
-   - The application will show the number of selected files
+   - **Select KMALL/ALL Files**: Choose one or more .kmall or .all files, or
+   - **Select Directory**: Add all .kmall/.all files in a folder. Check **Include Subdirectories When Adding A Directory** to search subfolders recursively.
+   - The application shows the number of selected files.
 
 3. **Choose Output Directory**
-   - Click "Select Output Directory"
-   - Choose where to save the converted PKL files
+   - Click "Select Output Directory" and choose where to save the converted PKL files.
 
 4. **Set Options**
-   - Check "Enable compression" for smaller files (recommended)
-   - Uncheck for faster conversion (larger files)
+   - **Enable compression**: For smaller files (recommended). Uncheck for faster conversion and larger files.
+   - **Overwrite existing PKL files**: Check to replace existing outputs; leave unchecked to skip files that are already up-to-date.
 
 5. **Start Conversion**
-   - Click "Start Conversion"
-   - Monitor progress in the progress bar and log area
-   - The application will show real-time status updates
+   - Click "Start Conversion" and monitor the progress bar and log. A summary dialog appears when done.
 
 6. **Review Results**
-   - A summary dialog will show conversion results
-   - Check the log area for detailed information
+   - Check the summary and log for converted, skipped, and failed counts and any errors.
 
 ## Output Files
 
@@ -112,9 +115,9 @@ Each PKL file contains optimized data structures for fast loading:
 - Progress is shown in real-time
 
 ### For Batch Processing
-- Select multiple files at once for efficient batch conversion
-- The converter skips files that are already up-to-date
-- Failed files are reported in the summary
+- Select multiple files or use "Select Directory" (with optional "Include Subdirectories") for batch conversion.
+- The converter skips files that are already up-to-date unless "Overwrite existing PKL files" is checked.
+- Failed files are reported in the summary and log.
 
 ## Troubleshooting
 
@@ -122,9 +125,9 @@ Each PKL file contains optimized data structures for fast loading:
 
 1. **Import Errors**
    ```
-   Error: Could not import multibeam_tools libraries
+   Error: Could not import libraries from libs folder
    ```
-   **Solution**: Ensure the MultibeamToolsAI directory structure is correct
+   **Solution**: Ensure the `libs/` folder is present next to the script (or executable) with the required modules.
 
 2. **PyQt6 Not Found**
    ```
@@ -148,9 +151,8 @@ Each PKL file contains optimized data structures for fast loading:
 
 If you encounter issues:
 1. Check the log area for detailed error messages
-2. Ensure all dependencies are installed correctly
-3. Verify the MultibeamToolsAI directory structure
-4. Try converting a single small file first
+2. Ensure all dependencies are installed and the `libs/` folder is present
+3. Try converting a single small file first
 
 ## Technical Details
 
@@ -173,11 +175,13 @@ If you encounter issues:
 
 ## License
 
-This converter is part of the MultibeamToolsAI project. See the main project LICENSE file for details.
+This converter is part of the Swath Coverage Analysis Tools project. See the project LICENSE file for details.
 
 ## Version History
 
-- **v1.0**: Initial release with basic conversion functionality
+- **v2026.01**: Dark theme (Fusion + dark palette); executable naming `KMALL_to_SwathPKL_Converter_v` + version
+- **v2025.02**: Include subdirectories when adding a directory; updated executable naming
+- **v2025.01**: Initial release
   - GUI interface
   - Batch processing
   - Compression support
