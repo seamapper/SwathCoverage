@@ -16,7 +16,8 @@ Features:
 Author: Paul Johnson
 """
 # __version__ = "2025.01"  # First Release of the program
-__version__ = "2025.02"  # Added subdirectory search option
+# __version__ = "2025.02"  # Added subdirectory search option
+__version__ = "2026.01"  # Added subdirectory search option
 
 import sys
 import os
