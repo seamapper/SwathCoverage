@@ -37,7 +37,8 @@ Key Features:
 # __version__ = "2025.09"  # GUI improvements, Fixed Plots Scaling
 # __version__ = "2025.10"  # Reorganized sources area into tabs   
 # __version__ = "2025.11"  # Fixed plot decimation to only run when filter settings are changed
-__version__ = "2025.12"  # Fixed layout for swath pkl and archive pkl management
+# __version__ = "2025.12"  # Fixed layout for swath pkl and archive pkl management
+__version__ = "2026.01"  # Added dark theme and updated layout for swath pkl and archive pkl management
 
 # BSD-3-Clause License
 #
@@ -458,37 +459,37 @@ class MainWindow(QtWidgets.QMainWindow):
             
             for widget in widgets:
                 if is_enabled:
-                    # Enabled state: white background, black text
+                    # Enabled state: dark theme base and text
                     widget.setStyleSheet("""
                         QLineEdit {
-                            color: black !important;
-                            background-color: white !important;
-                            border: 1px solid #404040;
+                            color: #e0e0e0;
+                            background-color: #2a2a2a;
+                            border: 1px solid #505050;
                         }
                         QLineEdit:focus {
-                            color: black !important;
-                            background-color: white !important;
+                            color: #e0e0e0;
+                            background-color: #2a2a2a;
                         }
                         QLineEdit:hover {
-                            color: black !important;
-                            background-color: white !important;
+                            color: #e0e0e0;
+                            background-color: #2a2a2a;
                         }
                     """)
                 else:
-                    # Disabled state: black background, light grey text
+                    # Disabled state: darker background, muted text
                     widget.setStyleSheet("""
                         QLineEdit {
-                            color: #C0C0C0 !important;
-                            background-color: black !important;
-                            border: 1px solid #404040;
+                            color: #7f7f7f;
+                            background-color: #1e1e1e;
+                            border: 1px solid #505050;
                         }
                         QLineEdit:focus {
-                            color: #C0C0C0 !important;
-                            background-color: black !important;
+                            color: #7f7f7f;
+                            background-color: #1e1e1e;
                         }
                         QLineEdit:hover {
-                            color: #C0C0C0 !important;
-                            background-color: black !important;
+                            color: #7f7f7f;
+                            background-color: #1e1e1e;
                         }
                     """)
 
@@ -1848,7 +1849,7 @@ class MainWindow(QtWidgets.QMainWindow):
         toggle_chk_gb = GroupBox('Other options', toggle_chk_layout, False, False, 'other_options_gb')
 
         # Plotting and analysis group
-        plot_btn_gb = GroupBox('Plot Data',
+        plot_btn_gb = GroupBox('Export Plots',
                                BoxLayout([self.save_all_plots_btn], 'v'),
                                False, False, 'plot_btn_gb')
 
@@ -1859,9 +1860,9 @@ class MainWindow(QtWidgets.QMainWindow):
         export_btn_gb = GroupBox('Export Trend', export_horizontal_layout,
                                  False, False, 'export_btn_gb')
         
-        # Add Export Trend groupbox to left layout above Activity Log
-        # Insert it at position 1 (after file_gb, before log_gb)
-        self.left_layout.insertWidget(1, export_btn_gb, 0)  # stretch factor 0 for minimal space
+        # Add Plot Data and Export Trend groupboxes to left layout above Activity Log (Plot Data above Export Trend)
+        self.left_layout.insertWidget(1, plot_btn_gb, 0)   # stretch factor 0 for minimal space
+        self.left_layout.insertWidget(2, export_btn_gb, 0)  # stretch factor 0 for minimal space
 
         # add runtime parameter search options
         param_cond_lbl = Label('Show when', 60, 20, 'param_cond_lbl', (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter))
@@ -1956,7 +1957,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # set up tab 1: plot options
         self.tab1 = QtWidgets.QWidget()
         self.tab1_layout = BoxLayout([self.custom_info_gb, self.depth_ref_gb, cmode_layout, pt_param_gb, self.plot_lim_gb,
-                                      self.angle_lines_gb, self.n_wd_lines_gb, toggle_chk_gb, plot_btn_gb], 'v')
+                                      self.angle_lines_gb, self.n_wd_lines_gb, toggle_chk_gb], 'v')
         self.tab1_layout.addStretch()
         self.tab1.setLayout(self.tab1_layout)
 
@@ -1990,7 +1991,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if os.path.exists(ccom_mac_logo_path):
             logo_label = QtWidgets.QLabel()
             logo_pixmap = QtGui.QPixmap(ccom_mac_logo_path)
-            logo_pixmap = logo_pixmap.scaled(96, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            logo_pixmap = logo_pixmap.scaled(72, 36, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             logo_label.setPixmap(logo_pixmap)
             logo_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
             logo_row.addWidget(logo_label)
@@ -2521,8 +2522,39 @@ class NewPopup(QtWidgets.QWidget): # new class for additional plots
         QtWidgets.QWidget.__init__(self)
 
 
+def _apply_dark_fusion_theme(app):
+    """Apply Fusion style with a dark palette so the GUI is consistently dark."""
+    app.setStyle("Fusion")
+    from PyQt6.QtGui import QPalette, QColor
+    palette = QPalette()
+    # Window and general background
+    palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(240, 240, 240))
+    palette.setColor(QPalette.ColorRole.Base, QColor(42, 42, 42))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(66, 66, 66))
+    # Text and buttons
+    palette.setColor(QPalette.ColorRole.Text, QColor(240, 240, 240))
+    palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(240, 240, 240))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 255, 255))
+    # Highlight (selection)
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+    # Disabled
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor(127, 127, 127))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(127, 127, 127))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(127, 127, 127))
+    # Tooltip
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(240, 240, 240))
+    # Placeholder
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(127, 127, 127))
+    app.setPalette(palette)
+
+
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
+    _apply_dark_fusion_theme(app)
 
     main = MainWindow()
     main.show()
