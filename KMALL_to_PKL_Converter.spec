@@ -3,19 +3,16 @@
 import os
 import re
 
-# Get version from the main script dynamically
-version = "2025.02"  # Default fallback
+# Get version from the main script dynamically (script is in cwd when building)
+version = "2026.01"  # Default fallback
+_script_path = os.path.join(os.getcwd(), 'kmall_to_pkl_converter.py')
 try:
-    with open('kmall_to_pkl_converter.py', 'r', encoding='utf-8') as f:
+    with open(_script_path, 'r', encoding='utf-8') as f:
         content = f.read()
-        # Match __version__ that is not commented out (not preceded by #)
-        # Look for lines that don't start with # or have # after the version assignment
         for line in content.split('\n'):
-            # Skip commented lines
             stripped = line.strip()
             if stripped.startswith('#'):
                 continue
-            # Match uncommented __version__ lines
             match = re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]", line)
             if match:
                 version = match.group(1)
@@ -55,7 +52,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name=f'KMALL to SwathPKL Converter V{version}',
+    name=f'KMALL_to_SwathPKL_Converter_v{version}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
