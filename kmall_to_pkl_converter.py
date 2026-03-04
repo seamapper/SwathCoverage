@@ -1077,10 +1077,41 @@ class KMALLToPKLConverter(QMainWindow):
             self.log_message(f"Error clearing session config: {e}")
 
 
+def _apply_dark_fusion_theme(app):
+    """Apply Fusion style with a dark palette so the GUI is consistently dark."""
+    app.setStyle("Fusion")
+    from PyQt6.QtGui import QPalette, QColor
+    palette = QPalette()
+    # Window and general background
+    palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(240, 240, 240))
+    palette.setColor(QPalette.ColorRole.Base, QColor(42, 42, 42))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(66, 66, 66))
+    # Text and buttons
+    palette.setColor(QPalette.ColorRole.Text, QColor(240, 240, 240))
+    palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(240, 240, 240))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 255, 255))
+    # Highlight (selection)
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+    # Disabled
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor(127, 127, 127))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(127, 127, 127))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(127, 127, 127))
+    # Tooltip
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(240, 240, 240))
+    # Placeholder
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(127, 127, 127))
+    app.setPalette(palette)
+
+
 def main():
     """Main application entry point"""
     app = QApplication(sys.argv)
-    
+    _apply_dark_fusion_theme(app)
+
     # Set application properties
     app.setApplicationName("KMALL to PKL Converter")
     app.setApplicationVersion("1.0")
