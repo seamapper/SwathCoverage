@@ -199,6 +199,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.decimation_cache_valid = False  # Flag to track if cache is valid
         self.last_decimation_settings = {}  # Track last decimation settings
         self.last_filter_settings = {}  # Track last filter settings
+        self.filter_update_timer = None  # Debounce timer for filter-driven updates
         self.archive_filenames = []  # List of loaded archive PKL files
         
         # Initialize UI state tracking attributes
@@ -394,19 +395,19 @@ class MainWindow(QtWidgets.QMainWindow):
         for gb in gb_map:
             #groupboxes tend to not have objectnames, so use generic sender string
             gb.clicked.connect(lambda: self.update_filter_widget_styling())
-            gb.clicked.connect(lambda: refresh_plot(self, sender='GROUPBOX_CHK'))
+            gb.clicked.connect(lambda: self._schedule_filter_update(sender='GROUPBOX_CHK'))
 
         for cbox in cbox_map:
             # lambda needs _ for cbox
-            cbox.activated.connect(lambda _, sender=cbox.objectName(): refresh_plot(self, sender=sender))
+            cbox.activated.connect(lambda _, sender=cbox.objectName(): self._schedule_filter_update(sender=sender))
 
         for chk in chk_map:
             # lambda needs _ for chk
-            chk.stateChanged.connect(lambda _, sender=chk.objectName(): refresh_plot(self, sender=sender))
+            chk.stateChanged.connect(lambda _, sender=chk.objectName(): self._schedule_filter_update(sender=sender))
             
         for radio in radio_map:
             # lambda needs _ for radio
-            radio.toggled.connect(lambda _, sender=radio.objectName(): refresh_plot(self, sender=sender))
+            radio.toggled.connect(lambda _, sender=radio.objectName(): self._schedule_filter_update(sender=sender))
             
         # Connect radio buttons to enable/disable color buttons
         self.new_data_single_color_radio.toggled.connect(self.update_new_data_color_button)
@@ -416,7 +417,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         for tb in tb_map:
             # lambda seems to not need _ for tb
-            tb.returnPressed.connect(lambda sender=tb.objectName(): refresh_plot(self, sender=sender))
+            tb.returnPressed.connect(lambda sender=tb.objectName(): self._schedule_filter_update(sender=sender))
 
         # set up annotations on hovering
         self.swath_canvas.mpl_connect('motion_notify_event', self.hover)
@@ -475,23 +476,28 @@ class MainWindow(QtWidgets.QMainWindow):
                             background-color: #2a2a2a;
                         }
                     """)
-                else:
-                    # Disabled state: darker background, muted text
-                    widget.setStyleSheet("""
-                        QLineEdit {
-                            color: #7f7f7f;
-                            background-color: #1e1e1e;
-                            border: 1px solid #505050;
-                        }
-                        QLineEdit:focus {
-                            color: #7f7f7f;
-                            background-color: #1e1e1e;
-                        }
-                        QLineEdit:hover {
-                            color: #7f7f7f;
-                            background-color: #1e1e1e;
-                        }
-                    """)
+
+    def _schedule_filter_update(self, sender=None, delay_ms=2000):
+        """Debounce expensive filter-driven updates so we only process once after the user pauses.
+
+        This is used for filter groupboxes, text boxes, checkboxes, and related controls.
+        """
+        # Lazily create the timer the first time we need it
+        if self.filter_update_timer is None:
+            self.filter_update_timer = QtCore.QTimer(self)
+            self.filter_update_timer.setSingleShot(True)
+            self.filter_update_timer.timeout.connect(lambda: refresh_plot(self, sender=sender))
+        else:
+            # Disconnect previous timeout to avoid capturing an old sender
+            try:
+                self.filter_update_timer.timeout.disconnect()
+            except TypeError:
+                # No previous connections
+                pass
+            self.filter_update_timer.timeout.connect(lambda: refresh_plot(self, sender=sender))
+
+        # Restart the timer with the requested delay
+        self.filter_update_timer.start(delay_ms)
 
     def start_operation_log(self, operation_name):
         """Start timing an operation and log the start"""
