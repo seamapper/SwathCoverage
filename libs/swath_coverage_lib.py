@@ -549,6 +549,21 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
             self.tabs.setCurrentIndex(1)  # show filters tab
             return
 
+    # If primary data filters are enabled and custom plot limits are OFF, auto-scale to filtered dataset.
+    # Also, when viewing the Depth plot, auto-switch colormap scaling to "Filtered data".
+    try:
+        primary_filters_active = bool(getattr(self, 'angle_gb', None) and self.angle_gb.isChecked()) or \
+                                 bool(getattr(self, 'depth_gb', None) and self.depth_gb.isChecked()) or \
+                                 bool(getattr(self, 'bs_gb', None) and self.bs_gb.isChecked())
+        if primary_filters_active and hasattr(self, 'plot_lim_gb') and (not self.plot_lim_gb.isChecked()):
+            if hasattr(self, 'plot_tabs') and hasattr(self, 'clim_cbox') and self.plot_tabs.currentIndex() == 0:
+                idx = self.clim_cbox.findText('Filtered data')
+                if idx != -1 and self.clim_cbox.currentIndex() != idx:
+                    self.clim_cbox.setCurrentIndex(idx)
+    except Exception:
+        # If UI elements are not available yet, skip this convenience behavior.
+        pass
+
     if self.verbose_logging:
         print('************* REFRESH PLOT *****************')
         # sorting out how senders are handled when called with connect and lambda
@@ -956,10 +971,6 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
                 print('NAN in (i,y,z,angle,BS):',
                       i, y_all[i], z_all[i], angle_all[i], bs_all[i])
 
-    # update x and z max for axis resizing during each plot call
-    self.x_max = max([self.x_max, np.nanmax(np.abs(np.asarray(y_all)))])
-    self.z_max = max([self.z_max, np.nanmax(np.asarray(z_all))])
-
     # after updating axis limits, simply return w/o plotting if toggle for this data type (current/archive) is off
     if ((is_archive and not self.show_data_chk_arc.isChecked())
             or (not is_archive and not self.show_data_chk.isChecked())):
@@ -1048,6 +1059,24 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
 
     # apply filter masks to x, z, angle, and bs fields
     filter_idx = np.logical_and.reduce((angle_idx, depth_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx))
+
+    # Update x and z max for axis resizing.
+    # If Angle/Depth/Backscatter filters are enabled and custom plot limits are OFF,
+    # scale to the filtered dataset bounds to avoid using unfiltered extremes.
+    try:
+        primary_filters_active = self.angle_gb.isChecked() or self.depth_gb.isChecked() or self.bs_gb.isChecked()
+    except Exception:
+        primary_filters_active = False
+
+    if primary_filters_active and (not self.plot_lim_gb.isChecked()):
+        y_f = np.asarray(y_all)[filter_idx]
+        z_f = np.asarray(z_all)[filter_idx]
+        if y_f.size and z_f.size:
+            self.x_max = max([self.x_max, np.nanmax(np.abs(y_f))])
+            self.z_max = max([self.z_max, np.nanmax(z_f)])
+    else:
+        self.x_max = max([self.x_max, np.nanmax(np.abs(np.asarray(y_all)))])
+        self.z_max = max([self.z_max, np.nanmax(np.asarray(z_all))])
 
     # get color mode and set up color maps and legend
     cmode = [self.cmode, self.cmode_arc][is_archive]  # get user selected color mode for local use
@@ -2978,6 +3007,24 @@ def clear_plot(self):
     self.data_rate_ax2.clear()
     self.x_max = 1
     self.z_max = 1
+    # When scaling to filtered data, reset so limits are built only from filtered bounds
+    try:
+        primary_filters = (getattr(self, 'angle_gb', None) and self.angle_gb.isChecked()) or \
+                          (getattr(self, 'depth_gb', None) and self.depth_gb.isChecked()) or \
+                          (getattr(self, 'bs_gb', None) and self.bs_gb.isChecked())
+        if primary_filters and getattr(self, 'plot_lim_gb', None) and not self.plot_lim_gb.isChecked():
+            self.x_max = 0.0
+            self.z_max = 0.0
+            if hasattr(self, 'x_max_custom'):
+                self.x_max_custom = 0.0
+            if hasattr(self, 'z_max_custom'):
+                self.z_max_custom = 0.0
+            if hasattr(self, 'dr_max_custom'):
+                self.dr_max_custom = 0.0
+            if hasattr(self, 'pi_max_custom'):
+                self.pi_max_custom = 0.0
+    except Exception:
+        pass
 
 
 def archive_data(self):
@@ -6319,10 +6366,37 @@ def load_swath_pkl(self):
             successful_files = 0
             total_files = len(pickle_files)
             
+            # Initialize progress bar to show "current / total files"
+            if hasattr(self, 'calc_pb'):
+                try:
+                    self.calc_pb.setVisible(True)
+                except Exception:
+                    pass
+                self.calc_pb.setMaximum(total_files)
+                self.calc_pb.setValue(0)
+                try:
+                    self.calc_pb.setFormat("%v / %m files")
+                    self.calc_pb.setTextVisible(True)
+                except Exception:
+                    pass
+
             for i, pickle_file in enumerate(pickle_files):
                 filename = os.path.basename(pickle_file)
                 
                 # Update progress
+                if hasattr(self, 'calc_pb'):
+                    self.calc_pb.setValue(i + 1)
+                if hasattr(self, 'current_file_lbl'):
+                    try:
+                        self.current_file_lbl.setText(f"Loading: {filename}")
+                    except Exception:
+                        pass
+                try:
+                    from PyQt6.QtWidgets import QApplication
+                    QApplication.processEvents()
+                except Exception:
+                    pass
+
                 if hasattr(self, 'log_progress'):
                     self.log_progress(i + 1, total_files, f"Loading pickle files")
                 else:
@@ -6541,6 +6615,15 @@ def load_swath_pkl(self):
                     
                     # Refresh plot
                     refresh_plot(self, print_time=True, call_source='load_swath_pkl')
+
+            # Finalize progress bar
+            if hasattr(self, 'calc_pb'):
+                self.calc_pb.setValue(total_files)
+            if hasattr(self, 'current_file_lbl'):
+                try:
+                    self.current_file_lbl.setText("Current file:")
+                except Exception:
+                    pass
                     
                     # Log completion
                     success_msg = f"Successfully loaded {successful_files} pickle files as swath data"

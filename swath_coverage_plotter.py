@@ -71,7 +71,7 @@ __version__ = "2026.01"  # Added dark theme and updated layout for swath pkl and
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # Standard library imports
-from PyQt6 import QtWidgets, QtGui
+from PyQt6 import QtWidgets, QtGui, QtCore
 from PyQt6.QtGui import QDoubleValidator
 from PyQt6.QtCore import Qt, QSize
 
@@ -477,7 +477,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         }
                     """)
 
-    def _schedule_filter_update(self, sender=None, delay_ms=2000):
+    def _schedule_filter_update(self, sender=None, delay_ms=5000):
         """Debounce expensive filter-driven updates so we only process once after the user pauses.
 
         This is used for filter groupboxes, text boxes, checkboxes, and related controls.
@@ -695,7 +695,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Create file management buttons with tooltips
         self.add_file_btn = PushButton('Add Files', btnw, btnh, 'add_file_btn', 'Add files')
         self.get_indir_btn = PushButton('Add Directory', btnw, btnh, 'get_indir_btn', 'Add a directory')
-        self.include_subdir_chk = CheckBox('Include Subdirectories', False, 'include_subdir_chk',
+        self.include_subdir_chk = CheckBox('Include Subdirectories', True, 'include_subdir_chk',
                                            'Include subdirectories when adding a directory')
 
         # File removal and data management buttons
@@ -712,7 +712,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.load_swath_pkl_btn = PushButton('Add PKL Files', btnw, btnh, 'load_swath_pkl_btn',
                                              'Load pickle files as swath data (faster than source files)')
         self.get_pkl_dir_btn = PushButton('Add Directory', btnw, btnh, 'get_pkl_dir_btn', 'Add a directory of PKL files')
-        self.include_pkl_subdir_chk = CheckBox('Include Subdirectories', False, 'include_pkl_subdir_chk',
+        self.include_pkl_subdir_chk = CheckBox('Include Subdirectories', True, 'include_pkl_subdir_chk',
                                                'Include subdirectories when adding a directory of PKL files')
         self.convert_pickle_btn = PushButton('Convert to Swath PKL', btnw, btnh, 'convert_pickle_btn',
                                              'Convert source files to optimized pickle files for faster loading')
@@ -853,7 +853,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Archive data buttons: Add Archive, Remove Selected, Add Directory, Remove All, include subdirectories toggle
         self.load_archive_dir_btn = PushButton('Add Directory', btnw, btnh, 'load_archive_dir_btn',
                                                'Add all archive PKL files from a directory')
-        self.include_archive_subdir_chk = CheckBox('Include Subdirectories', False, 'include_archive_subdir_chk',
+        self.include_archive_subdir_chk = CheckBox('Include Subdirectories', True, 'include_archive_subdir_chk',
                                                    'Include subdirectories when adding archive PKL files from a directory')
         
         archive_btn_row1 = BoxLayout([self.load_archive_btn, self.remove_archive_btn], 'h')
@@ -1729,7 +1729,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                    'clearly limited by runtime parameters during acquisition.')
 
         # add plotted point max count and decimation factor control in checkable groupbox
-        max_count_lbl = Label('Max. plotted points (0-inf):', width=140, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        max_count_lbl = Label('Max plotted pts (0-inf):', width=140, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         self.max_count_tb = LineEdit(str(self.n_points_max_default), 50, 20, 'max_count_tb',
                                      'Set the maximum number of plotted points for each data set')
         self.max_count_tb.setValidator(QDoubleValidator(0, np.inf, 2))
@@ -2257,9 +2257,36 @@ class MainWindow(QtWidgets.QMainWindow):
             # Only invalidate if we're actually loading new files, not just refreshing
             if pkl_files:  # Only invalidate if we have files to process
                 self._invalidate_decimation_cache()
+
+            # Initialize progress bar to show "current / total files"
+            total_files = len(pkl_files)
+            if hasattr(self, 'calc_pb'):
+                try:
+                    self.calc_pb.setVisible(True)
+                except Exception:
+                    pass
+                self.calc_pb.setMaximum(total_files)
+                self.calc_pb.setValue(0)
+                try:
+                    self.calc_pb.setFormat("%v / %m files")
+                    self.calc_pb.setTextVisible(True)
+                except Exception:
+                    pass
             
             # Process each PKL file using the same logic as load_swath_pkl
-            for pickle_file in pkl_files:
+            for i, pickle_file in enumerate(pkl_files):
+                filename = os.path.basename(pickle_file)
+                if hasattr(self, 'calc_pb'):
+                    self.calc_pb.setValue(i + 1)
+                if hasattr(self, 'current_file_lbl'):
+                    try:
+                        self.current_file_lbl.setText(f"Loading: {filename}")
+                    except Exception:
+                        pass
+                try:
+                    QtWidgets.QApplication.processEvents()
+                except Exception:
+                    pass
                 try:
                     from .libs.swath_coverage_lib import load_pickle_file
                 except ImportError:
@@ -2277,7 +2304,6 @@ class MainWindow(QtWidgets.QMainWindow):
                         data = apply_swath_pkl_decimation(self, data)
                     
                     # Add to data_new and filenames
-                    filename = os.path.basename(pickle_file)
                     self.data_new[filename] = data
                     self.filenames.append(pickle_file)
                     
@@ -2354,6 +2380,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 import traceback
                 self.update_log(f"Traceback: {traceback.format_exc()}")
         finally:
+            # Finalize progress bar
+            if pkl_files and hasattr(self, 'calc_pb'):
+                self.calc_pb.setValue(len(pkl_files))
+            if hasattr(self, 'current_file_lbl'):
+                try:
+                    self.current_file_lbl.setText("Current file:")
+                except Exception:
+                    pass
             # End operation logging
             if hasattr(self, 'end_operation_log'):
                 self.end_operation_log("Loading Swath Pickle Files")
