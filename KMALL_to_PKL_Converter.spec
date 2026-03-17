@@ -4,7 +4,7 @@ import os
 import re
 
 # Get version from the main script dynamically (script is in cwd when building)
-version = "2026.01"  # Default fallback
+version = "2026.02"  # Default fallback
 _script_path = os.path.join(os.getcwd(), 'kmall_to_pkl_converter.py')
 try:
     with open(_script_path, 'r', encoding='utf-8') as f:

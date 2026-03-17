@@ -17,7 +17,8 @@ Author: Paul Johnson
 """
 # __version__ = "2025.01"  # First Release of the program
 # __version__ = "2025.02"  # Added subdirectory search option
-__version__ = "2026.01"  # Added dark theme
+# __version__ = "2026.01"  # Added dark theme
+__version__ = "2026.02"  # changed progress bar to show "current / total files, created ability to save files in a SwathPKL directory"
 
 import sys
 import os
@@ -73,7 +74,8 @@ def load_session_config():
         'last_input_dir': '',
         'last_output_dir': '',
         'last_compression_setting': True,
-        'last_include_subdirs_setting': False
+        'last_include_subdirs_setting': False,
+        'last_store_in_swathpkl_setting': True
     }
     
     try:
@@ -737,6 +739,12 @@ class KMALLToPKLConverter(QMainWindow):
         self.include_subdirs_checkbox.setChecked(last_include_subdirs)
         options_layout.addWidget(self.include_subdirs_checkbox)
         
+        self.store_in_swathpkl_checkbox = QCheckBox("Store files in SwathPKL Directory")
+        # Load last setting (default to True)
+        last_store_in_swathpkl = self.session_config.get('last_store_in_swathpkl_setting', True)
+        self.store_in_swathpkl_checkbox.setChecked(last_store_in_swathpkl)
+        options_layout.addWidget(self.store_in_swathpkl_checkbox)
+        
         main_layout.addWidget(options_group)
         
         # Progress group
@@ -796,6 +804,11 @@ class KMALLToPKLConverter(QMainWindow):
         self.overwrite_checkbox.stateChanged.connect(self.save_overwrite_setting)
         self.include_subdirs_checkbox.stateChanged.connect(self.save_include_subdirs_setting)
         self.clear_config_btn.clicked.connect(self.clear_session_config)
+        self.store_in_swathpkl_checkbox.stateChanged.connect(self.save_store_in_swathpkl_setting)
+        self.store_in_swathpkl_checkbox.stateChanged.connect(self.update_output_button_text)
+        
+        # Ensure output button text matches initial setting
+        self.update_output_button_text()
     
     def select_input_files(self):
         """Select input KMALL/ALL files"""
@@ -894,9 +907,12 @@ class KMALLToPKLConverter(QMainWindow):
         # Use last output directory if available
         start_dir = self.last_output_dir if self.last_output_dir else ""
         
+        # Dialog title depends on whether we're storing in SwathPKL
+        dialog_title = "Select parent directory for SwathPKL folder" if self.store_in_swathpkl_checkbox.isChecked() else "Select output directory for PKL files"
+        
         directory = QFileDialog.getExistingDirectory(
             self,
-            "Select output directory for PKL files",
+            dialog_title,
             start_dir
         )
         
@@ -932,6 +948,18 @@ class KMALLToPKLConverter(QMainWindow):
         self.session_config['last_include_subdirs_setting'] = self.include_subdirs_checkbox.isChecked()
         save_session_config(self.session_config)
     
+    def save_store_in_swathpkl_setting(self):
+        """Save the SwathPKL directory setting to session config"""
+        self.session_config['last_store_in_swathpkl_setting'] = self.store_in_swathpkl_checkbox.isChecked()
+        save_session_config(self.session_config)
+    
+    def update_output_button_text(self):
+        """Update the output directory button text based on SwathPKL setting"""
+        if self.store_in_swathpkl_checkbox.isChecked():
+            self.select_output_btn.setText("Select Parent Directory")
+        else:
+            self.select_output_btn.setText("Select Output Directory")
+    
     def start_conversion(self):
         """Start the conversion process"""
         if not self.input_files or not self.output_dir:
@@ -947,13 +975,30 @@ class KMALLToPKLConverter(QMainWindow):
         
         # Show progress bar
         self.progress_bar.setVisible(True)
+        # Use file count for progress, and show "current / total files"
         self.progress_bar.setMaximum(len(self.input_files))
         self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("%v / %m files")
+        self.progress_bar.setTextVisible(True)
+        
+        # Determine effective output directory
+        effective_output_dir = self.output_dir
+        if self.store_in_swathpkl_checkbox.isChecked():
+            # Create SwathPKL subdirectory inside the selected parent directory
+            effective_output_dir = os.path.join(self.output_dir, "SwathPKL")
+            try:
+                os.makedirs(effective_output_dir, exist_ok=True)
+                self.log_message(f"Storing Swath PKL files in: {effective_output_dir}")
+            except Exception as e:
+                QMessageBox.critical(self, "Output Directory Error",
+                                     f"Could not create SwathPKL directory:\n{effective_output_dir}\n\nError: {e}")
+                self.reset_ui()
+                return
         
         # Start conversion worker thread
         self.worker = ConversionWorker(
             self.input_files,
-            self.output_dir,
+            effective_output_dir,
             self.compression_checkbox.isChecked(),
             self.overwrite_checkbox.isChecked()
         )
@@ -1059,7 +1104,8 @@ class KMALLToPKLConverter(QMainWindow):
                 'last_input_dir': '',
                 'last_output_dir': '',
                 'last_compression_setting': True,
-                'last_include_subdirs_setting': False
+                'last_include_subdirs_setting': False,
+                'last_store_in_swathpkl_setting': True
             }
             self.last_input_dir = ''
             self.last_output_dir = ''
@@ -1071,6 +1117,8 @@ class KMALLToPKLConverter(QMainWindow):
             self.output_label.setText("No output directory selected")
             self.compression_checkbox.setChecked(True)
             self.include_subdirs_checkbox.setChecked(False)
+            self.store_in_swathpkl_checkbox.setChecked(True)
+            self.update_output_button_text()
             self.update_convert_button_state()
             
             self.log_message("Session configuration cleared - settings reset to defaults")
