@@ -157,7 +157,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # Load last directories from configuration for different operations
         # This provides session persistence for user convenience
         try:
-            from libs.swath_coverage_lib import load_session_config
             config = load_session_config()
             self.plot_save_dir = config.get("last_plot_save_dir", os.getcwd())
             self.archive_save_dir = config.get("last_archive_save_dir", os.getcwd())
@@ -247,6 +246,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dec_fac = 1
         self.rtp_angle_buffer = 0
         self.last_cmode = 'depth'
+
+        # Track whether a coverage trend has been computed this session (for new/archive)
+        self.has_trend_new = False
+        self.has_trend_arc = False
         
         # Initialize colorbar and legend objects
         self.cbar_ax1 = None
@@ -1421,11 +1424,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # set right layout with swath plot controls
         # add text boxes for system, ship, cruise
         
-        # Export Gap Filler button and controls (moved from left panel)
+        # Export Gap Filler button (exports current trend from Trend tab)
         self.export_gf_btn = PushButton('Export Gap Filler', 100, 20, 'export_gf_btn',
                                              'Export text file of swath coverage trend for Gap Filler import')
-        self.export_gf_cbox = ComboBox(['New', 'Archive'], 55, 20, 'export_gf_cbox',
-                                       'Select data source to use for trend export')
         model_tb_lbl = Label('Model:', width=100, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         self.model_cbox = ComboBox(self.model_list, 100, 20, 'model_cbox', 'Select the model')
         self.show_model_chk = CheckBox('', True, 'show_model_chk', 'Show model in plot title')
@@ -1450,7 +1451,7 @@ class MainWindow(QtWidgets.QMainWindow):
         cruise_info_layout = BoxLayout([cruise_info_layout_left, self.show_cruise_chk], 'h',
                                        alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
 
-        self.custom_info_gb = GroupBox('Use custom system information',
+        self.custom_info_gb = GroupBox('Use Custom System Information',
                                        BoxLayout([model_info_layout, ship_info_layout, cruise_info_layout], 'v'),
                                        True, False, 'custom_info_gb')
         self.custom_info_gb.setToolTip('Add system/cruise info; system info parsed from the file is used if available')
@@ -1473,15 +1474,15 @@ class MainWindow(QtWidgets.QMainWindow):
                                  'Raw: use the native depths and acrosstrack distances parsed from the file '
                                  '(.all: referenced to TX array; .kmall: referenced to mapping system origin)')
 
-        depth_ref_lbl = Label('Reference data to:', 100, 20, 'depth_ref_lbl', (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter))
+        depth_ref_lbl = Label('Reference Data To:', 100, 20, 'depth_ref_lbl', (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter))
         depth_ref_layout = BoxLayout([depth_ref_lbl, self.ref_cbox], 'h')
-        self.depth_ref_gb = GroupBox('Depth reference', depth_ref_layout, False, False, 'depth_ref_gb')
+        self.depth_ref_gb = GroupBox('Depth Reference', depth_ref_layout, False, False, 'depth_ref_gb')
 
         # add point color options for swath data (was new data)
-        self.show_data_chk = CheckBox('Swath data', True, 'show_data_chk', 'Show swath data')
-        self.new_data_color_by_type_radio = RadioButton('Color by data type', True, 'new_data_color_by_type_radio', 
+        self.show_data_chk = CheckBox('Swath Data', True, 'show_data_chk', 'Show swath data')
+        self.new_data_color_by_type_radio = RadioButton('Color by Data', True, 'new_data_color_by_type_radio', 
                                                        'Color swath data according to the tab type (depth, backscatter, ping mode, etc.)')
-        self.new_data_single_color_radio = RadioButton('Single color', False, 'new_data_single_color_radio',
+        self.new_data_single_color_radio = RadioButton('Single Color', False, 'new_data_single_color_radio',
                                                       'Use a single color for all swath data')
         self.new_data_color_btn = PushButton('Select Color', 80, 20, 'new_data_color_btn', 'Select solid color for swath data')
         self.new_data_color_btn.setEnabled(False)  # disable until 'Single color' is selected
@@ -1490,9 +1491,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # add point color options for archive data
         self.show_data_chk_arc = CheckBox('Archive data', False, 'show_data_chk_arc', 'Show archive data')
-        self.archive_data_color_by_type_radio = RadioButton('Color by data type', False, 'archive_data_color_by_type_radio',
+        self.archive_data_color_by_type_radio = RadioButton('Color by Data', False, 'archive_data_color_by_type_radio',
                                                            'Color archive data according to the tab type (depth, backscatter, ping mode, etc.)')
-        self.archive_data_single_color_radio = RadioButton('Single color', True, 'archive_data_single_color_radio',
+        self.archive_data_single_color_radio = RadioButton('Single Color', True, 'archive_data_single_color_radio',
                                                           'Use a single color for all archive data')
         self.archive_data_color_btn = PushButton('Select Color', 80, 20, 'archive_data_color_btn', 'Select solid color for archive data')
         self.archive_data_color_btn.setEnabled(True)  # enabled since single color is default
@@ -1616,7 +1617,7 @@ class MainWindow(QtWidgets.QMainWindow):
         plot_lim_layout_width = BoxLayout([max_x_lbl, self.max_x_tb], 'h')
         plot_lim_layout_lower = BoxLayout([max_dr_lbl, self.max_dr_tb, max_pi_lbl, self.max_pi_tb], 'h')
         plot_lim_layout = BoxLayout([depth_gb, plot_lim_layout_width, plot_lim_layout_lower], 'v')
-        self.plot_lim_gb = GroupBox('Use custom plot limits', plot_lim_layout, True, False, 'plot_lim_gb')
+        self.plot_lim_gb = GroupBox('Use Custom Plot Limits', plot_lim_layout, True, False, 'plot_lim_gb')
         self.plot_lim_gb.setToolTip('Set minimum and maximum depth and width (0-30000 m) to override automatic plot scaling.')
 
         # add custom swath angle limits
@@ -1633,21 +1634,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.max_angle_tb.setValidator(QDoubleValidator(float(self.min_angle_tb.text()), np.inf, 2))
 
         # add custom depth limits
-        min_depth_lbl = Label('Min depth (m):', alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-        max_depth_lbl = Label('Max depth (m):', alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-        self.min_depth_tb = LineEdit('0', 40, 20, 'min_depth_tb', 'Min depth of the new data')
+        min_depth_lbl = Label('Min Depth (m):', alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        max_depth_lbl = Label('Max Depth (m):', alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        self.min_depth_tb = LineEdit('0', 40, 20, 'min_depth_tb', 'Min depth of the swath data')
         self.min_depth_arc_tb = LineEdit('0', 40, 20, 'min_depth_arc_tb', 'Min depth of the archive data')
-        self.max_depth_tb = LineEdit('10000', 40, 20, 'max_depth_tb', 'Max depth of the new data')
+        self.max_depth_tb = LineEdit('10000', 40, 20, 'max_depth_tb', 'Max depth of the swath data')
         self.max_depth_arc_tb = LineEdit('10000', 40, 20, 'max_depth_arc_tb', 'Max depth of the archive data')
         self.min_depth_tb.setValidator(QDoubleValidator(0, float(self.max_depth_tb.text()), 2))
         self.max_depth_tb.setValidator(QDoubleValidator(float(self.min_depth_tb.text()), np.inf, 2))
         self.min_depth_arc_tb.setValidator(QDoubleValidator(0, float(self.max_depth_arc_tb.text()), 2))
         self.max_depth_arc_tb.setValidator(QDoubleValidator(float(self.min_depth_arc_tb.text()), np.inf, 2))
         depth_layout_left = BoxLayout([QtWidgets.QLabel(''), min_depth_lbl, max_depth_lbl], 'v')
-        depth_layout_center = BoxLayout([QtWidgets.QLabel('New'), self.min_depth_tb, self.max_depth_tb], 'v')
+        depth_layout_center = BoxLayout([QtWidgets.QLabel('Swath'), self.min_depth_tb, self.max_depth_tb], 'v')
         depth_layout_right = BoxLayout([QtWidgets.QLabel('Archive'), self.min_depth_arc_tb, self.max_depth_arc_tb], 'v')
         depth_layout = BoxLayout([depth_layout_left, depth_layout_center, depth_layout_right], 'h')
-        self.depth_gb = GroupBox('Depth (new/archive)', depth_layout, True, False, 'depth_gb')
+        self.depth_gb = GroupBox('Depth (swath/archive)', depth_layout, True, False, 'depth_gb')
         self.depth_gb.setToolTip('Hide data by depth (m, positive down).\n\nAcceptable min/max fall within [0 inf].')
 
         # add custom reported backscatter limits
@@ -1841,9 +1842,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                               'and ping interval plots.  Uncheck to use solid colors for data plots; '
                                               'the most recent solid colors will be used for new / archive data plots')
 
-        self.show_coverage_trend_chk = CheckBox('Show coverage trend points', False, 'show_cov_trend_chk',
-                                                'Show coverage trend points that will be used for export (e.g., to Gap '
-                                                'Filler text file), if available')
+        self.show_coverage_trend_chk = CheckBox('Show Coverage Trend', False, 'show_cov_trend_chk',
+                                                'When checked, display the coverage trend points on the depth plot.')
 
 
 
@@ -1859,16 +1859,18 @@ class MainWindow(QtWidgets.QMainWindow):
                                BoxLayout([self.save_all_plots_btn], 'v'),
                                False, False, 'plot_btn_gb')
 
-        # Export functionality group (moved to left panel above Activity Log)
-        export_gf_lbl = Label('Source:')
-        export_gf_source = BoxLayout([export_gf_lbl, self.export_gf_cbox], 'h')
-        export_horizontal_layout = BoxLayout([self.export_gf_btn, export_gf_source], 'h')
-        export_btn_gb = GroupBox('Export Trend', export_horizontal_layout,
+        # Export functionality group (exports whatever trend is current in Trend tab)
+        export_btn_gb = GroupBox('Export', BoxLayout([self.export_gf_btn], 'v'),
                                  False, False, 'export_btn_gb')
+        # Show Export Trend groupbox only when coverage trend calculation is enabled
+        self.export_trend_gb = export_btn_gb
+        self.export_trend_gb.setVisible(self.show_coverage_trend_chk.isChecked())
+        self.show_coverage_trend_chk.toggled.connect(self.export_trend_gb.setVisible)
+        # Show Coverage Trend checkbox also manages calculation/clearing of plotted trend
+        self.show_coverage_trend_chk.toggled.connect(self._handle_show_trend_toggled)
         
-        # Add Plot Data and Export Trend groupboxes to left layout above Activity Log (Plot Data above Export Trend)
+        # Add Plot Data groupbox to left layout above Activity Log
         self.left_layout.insertWidget(1, plot_btn_gb, 0)   # stretch factor 0 for minimal space
-        self.left_layout.insertWidget(2, export_btn_gb, 0)  # stretch factor 0 for minimal space
 
         # add runtime parameter search options
         param_cond_lbl = Label('Show when', 60, 20, 'param_cond_lbl', (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter))
@@ -1956,7 +1958,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_param_log_btn = PushButton('Save Search Log', 100, 20, 'param_log_save_btn',
                                              'Save the current Acquisition Parameter Log to a text file')
 
-         # set up tabs
+        # set up tabs
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.setStyleSheet("background-color: none")
 
@@ -1980,32 +1982,61 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tab3_layout.addStretch()
         self.tab3.setLayout(self.tab3_layout)
 
-        # add tabs to tab layout
+        # set up tab 4: coverage trend table (Depth/Width per bin)
+        self.trend_tab = QtWidgets.QWidget()
+        # GroupBox for calculation controls at top of Trend tab
+        self.trend_source_cbox = ComboBox(['Swath', 'Archive'], 100, 20, 'trend_source_cbox',
+                                          'Select the source dataset for coverage trend calculation')
+        trend_source_lbl = Label('Source:', width=50,
+                                 alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        trend_source_layout = BoxLayout([trend_source_lbl, self.trend_source_cbox], 'h')
+
+        self.trend_steps_cbox = ComboBox(['5', '10', '15', '20', '25'], 100, 20, 'trend_steps_cbox',
+                                         'Number of depth bands for coverage trend')
+        self.trend_steps_cbox.setCurrentText('10')
+        trend_steps_lbl = Label('# of Steps:', width=50,
+                               alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        trend_steps_layout = BoxLayout([trend_steps_lbl, self.trend_steps_cbox], 'h')
+
+        self.calc_trend_btn = PushButton('Calculate Coverage Trend', 140, 20, 'calc_trend_btn',
+                                         'Calculate coverage trend from current filtered data')
+        self.calc_trend_btn.clicked.connect(self._handle_calc_trend_clicked)
+        calc_btn_layout = BoxLayout([self.calc_trend_btn], 'h')
+
+        calc_group_layout = BoxLayout([calc_btn_layout, trend_source_layout, trend_steps_layout], 'v')
+        calc_groupbox = GroupBox('Calculate', calc_group_layout, False, False, 'trend_calc_gb')
+
+        self.trend_table = QtWidgets.QTableWidget(0, 2, self.trend_tab)
+        self.trend_table.setHorizontalHeaderLabels(['Depth (m)', 'Width (m)'])
+        self.trend_table.horizontalHeader().setStretchLastSection(True)
+        self.trend_table.verticalHeader().setVisible(False)
+        self.trend_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.AllEditTriggers)
+        self.trend_table.setShowGrid(True)
+        # Explicit grid color so lines are visible (medium gray)
+        self.trend_table.setStyleSheet('QTableWidget { gridline-color: #888888; }')
+        trend_tab_layout = QtWidgets.QVBoxLayout()
+        trend_tab_layout.addWidget(calc_groupbox, 0)
+        trend_tab_layout.addWidget(self.trend_table, 1)
+        # Attach Export Trend groupbox at the bottom of the Trend tab
+        trend_tab_layout.addWidget(self.export_trend_gb, 0)
+        self.trend_tab.setLayout(trend_tab_layout)
+        # Editing the trend table updates the underlying trend arrays and plot
+        self.trend_table.cellChanged.connect(lambda row, col: trend_table_cell_changed(self, row, col))
+        # When # of Steps changes, refresh plot so trend is recalculated and redrawn
+        self.trend_steps_cbox.currentTextChanged.connect(lambda: refresh_plot(self))
+
+        # add tabs to tab layout (Trend before Search)
         self.tabs.addTab(self.tab1, 'Plot')
         self.tabs.addTab(self.tab2, 'Filter')
+        self.trend_tab_index = self.tabs.addTab(self.trend_tab, 'Trend')
         self.tabs.addTab(self.tab3, 'Search')
 
         self.tabw = 240  # set fixed tab width
         self.tabs.setFixedWidth(self.tabw)
 
-        # Add single CCOM_MAC logo to the right layout at the bottom
-        ccom_mac_logo_path = os.path.join(self.media_path, 'CCOM_MAC.png')
-        logo_row = QtWidgets.QHBoxLayout()
-        logo_row.setContentsMargins(0, 0, 0, 0)  # Remove any default margins
-        logo_row.addStretch()  # Add stretch to push logo to the right
-        # Add CCOM_MAC logo
-        if os.path.exists(ccom_mac_logo_path):
-            logo_label = QtWidgets.QLabel()
-            logo_pixmap = QtGui.QPixmap(ccom_mac_logo_path)
-            logo_pixmap = logo_pixmap.scaled(72, 36, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            logo_label.setPixmap(logo_pixmap)
-            logo_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
-            logo_row.addWidget(logo_label)
-        
-        # Create a container for the tabs and logo
+        # Container for the tabs
         right_content_layout = QtWidgets.QVBoxLayout()
         right_content_layout.addWidget(self.tabs)
-        right_content_layout.addLayout(logo_row)
         
         self.right_layout = BoxLayout([right_content_layout], 'v')
         self.right_layout.addStretch()
@@ -2016,6 +2047,48 @@ class MainWindow(QtWidgets.QMainWindow):
         # self.mainWidget.setLayout(BoxLayout([self.left_layout, self.swath_layout, self.right_layout], 'h'))
         
         self.mainWidget.setLayout(BoxLayout([self.left_layout, self.center_layout, self.right_layout], 'h'))
+
+
+    def _handle_calc_trend_clicked(self):
+        """Calculate coverage trend for current source (New/Archive) and update Trend tab / plot."""
+        # Determine whether to use new or archive data based on Trend tab Source combo
+        is_archive = False
+        if hasattr(self, 'trend_source_cbox'):
+            is_archive = str(self.trend_source_cbox.currentText()) == 'Archive'
+        # Use stored y_all/z_all from last plotting pass
+        z = getattr(self, 'z_all_arc' if is_archive else 'z_all', [])
+        y = getattr(self, 'y_all_arc' if is_archive else 'y_all', [])
+        if not z or not y:
+            if hasattr(self, 'update_log'):
+                self.update_log('No coverage data available to calculate trend', 'red')
+            return
+        # Calculate trend; plotting is gated by Show Coverage Trend checkbox inside calc_coverage_trend
+        calc_coverage_trend(self, z, y, is_archive)
+        if is_archive:
+            self.has_trend_arc = True
+        else:
+            self.has_trend_new = True
+
+
+    def _handle_show_trend_toggled(self, checked):
+        """Handle Show Coverage Trend checkbox; ensure trend exists and control visibility of trend points."""
+        # If turning on and no trend exists yet for current source, calculate it
+        is_archive = False
+        if hasattr(self, 'trend_source_cbox'):
+            is_archive = str(self.trend_source_cbox.currentText()) == 'Archive'
+        has_trend = self.has_trend_arc if is_archive else self.has_trend_new
+        if checked and not has_trend:
+            self._handle_calc_trend_clicked()
+        # If turning off, remove any existing trend artists from the plot
+        if not checked and hasattr(self, 'trend_artists'):
+            for art in list(self.trend_artists):
+                try:
+                    art.remove()
+                except Exception:
+                    pass
+            self.trend_artists = []
+            if hasattr(self, 'swath_canvas'):
+                self.swath_canvas.draw()
 
 
     def add_pkl_files_from_directory(self):

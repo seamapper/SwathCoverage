@@ -40,7 +40,7 @@ Plot Types:
 - Timing analysis
 """
 
-from PyQt6 import QtWidgets, QtGui
+from PyQt6 import QtWidgets, QtGui, QtCore
 from PyQt6.QtGui import QDoubleValidator, QColor
 from PyQt6.QtCore import Qt, QSize
 
@@ -555,12 +555,17 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
     self.pt_size = np.square(float(self.pt_size_cbox.currentText()))
     self.pt_alpha = np.divide(float(self.pt_alpha_cbox.currentText()), 100)
 
-    # Check if cache should be invalidated due to filter or decimation setting changes
-    # Only invalidate if settings actually changed (not just visual params)
-    if hasattr(self, '_check_filter_settings_changed') and hasattr(self, '_check_decimation_settings_changed'):
-        if self._check_filter_settings_changed() or self._check_decimation_settings_changed():
-            if hasattr(self, '_invalidate_decimation_cache'):
-                self._invalidate_decimation_cache()
+    # Check if cache should be invalidated due to filter or decimation setting changes.
+    # Only invalidate if settings actually changed (not just visual params like axis limits).
+    # Treat custom plot-limit controls as "visual only" so they don't force a re-decimation.
+    visual_only_senders = {
+        'max_x_tb', 'min_z_tb', 'max_z_tb', 'max_dr_tb', 'max_pi_tb', 'plot_lim_gb'
+    }
+    if sender not in visual_only_senders:
+        if hasattr(self, '_check_filter_settings_changed') and hasattr(self, '_check_decimation_settings_changed'):
+            if self._check_filter_settings_changed() or self._check_decimation_settings_changed():
+                if hasattr(self, '_invalidate_decimation_cache'):
+                    self._invalidate_decimation_cache()
 
     if validate_filters:
         if not validate_filter_text(self):  # validate user input, do not refresh until all float(input) works for all input
@@ -572,17 +577,42 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
             self.tabs.setCurrentIndex(1)  # show filters tab
             return
 
-    # If primary data filters are enabled and custom plot limits are OFF, auto-scale to filtered dataset.
-    # Also, when viewing the Depth plot, auto-switch colormap scaling to "Filtered data".
+        # If depth primary filter is enabled, sync custom plot limits to the depth filter values,
+        # but only once per enable so we don't continually mutate settings and retrigger refresh logic.
+        try:
+            depth_gb = getattr(self, 'depth_gb', None)
+            if depth_gb is not None:
+                # Reset the one-shot flag when depth filter is turned off
+                if not depth_gb.isChecked() and hasattr(self, '_depth_limits_synced'):
+                    self._depth_limits_synced = False
+                # When depth filter is first enabled, turn on custom limits and copy values
+                if depth_gb.isChecked() and getattr(self, 'plot_lim_gb', None):
+                    if not hasattr(self, '_depth_limits_synced'):
+                        self._depth_limits_synced = False
+                    if not self._depth_limits_synced:
+                        # Turn on "Use custom plot limits"
+                        if not self.plot_lim_gb.isChecked():
+                            self.plot_lim_gb.setChecked(True)
+                        # Copy Depth filter min/max into custom depth limits (use new-data fields)
+                        if hasattr(self, 'min_depth_tb') and hasattr(self, 'min_z_tb'):
+                            self.min_z_tb.setText(self.min_depth_tb.text())
+                        if hasattr(self, 'max_depth_tb') and hasattr(self, 'max_z_tb'):
+                            self.max_z_tb.setText(self.max_depth_tb.text())
+                        # Mark as synced so we don't keep changing these on every refresh
+                        self._depth_limits_synced = True
+        except Exception:
+            # If any UI element is missing, skip silently
+            pass
+
+    # If primary data filters are enabled, auto-switch Depth colormap scaling to "Filtered data".
     try:
         primary_filters_active = bool(getattr(self, 'angle_gb', None) and self.angle_gb.isChecked()) or \
                                  bool(getattr(self, 'depth_gb', None) and self.depth_gb.isChecked()) or \
                                  bool(getattr(self, 'bs_gb', None) and self.bs_gb.isChecked())
-        if primary_filters_active and hasattr(self, 'plot_lim_gb') and (not self.plot_lim_gb.isChecked()):
-            if hasattr(self, 'plot_tabs') and hasattr(self, 'clim_cbox') and self.plot_tabs.currentIndex() == 0:
-                idx = self.clim_cbox.findText('Filtered data')
-                if idx != -1 and self.clim_cbox.currentIndex() != idx:
-                    self.clim_cbox.setCurrentIndex(idx)
+        if primary_filters_active and hasattr(self, 'plot_tabs') and hasattr(self, 'clim_cbox') and self.plot_tabs.currentIndex() == 0:
+            idx = self.clim_cbox.findText('Filtered data')
+            if idx != -1 and self.clim_cbox.currentIndex() != idx:
+                self.clim_cbox.setCurrentIndex(idx)
     except Exception:
         # If UI elements are not available yet, skip this convenience behavior.
         pass
@@ -613,6 +643,10 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
             sender = 'NA'
 
     clear_plot(self)
+
+    # Clear trend scatter artists so we don't accumulate multiple trend plots per refresh
+    if hasattr(self, 'trend_artists'):
+        self.trend_artists = []
 
     # When primary filters (Angle/Depth/Backscatter) are on and custom limits off, ensure bounds
     # start at zero so plot_coverage builds them only from filtered data.
@@ -1512,8 +1546,9 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
             self.y_all = y_all
             self.z_all = z_all
 
-        print('calling calc_coverage_trend from plot_coverage')
-        calc_coverage_trend(self, z_all, y_all, is_archive)
+        if hasattr(self, 'show_coverage_trend_chk') and self.show_coverage_trend_chk.isChecked():
+            print('calling calc_coverage_trend from plot_coverage')
+            calc_coverage_trend(self, z_all, y_all, is_archive)
 
     # toc = process_time()
     # plot_time = toc - tic
@@ -3960,8 +3995,14 @@ def calc_coverage_trend(self, z_all, y_all, is_archive):
 
     try:
         print('trying to calculate means and medians')
-        # bins = np.linspace(min(self.z_all), max(self.z_all), 11)
-        bins = np.linspace(min(z_all), max(z_all), 11)
+        n_steps = 10
+        if hasattr(self, 'trend_steps_cbox'):
+            try:
+                n_steps = int(self.trend_steps_cbox.currentText())
+            except (ValueError, TypeError):
+                n_steps = 10
+        # n_steps depth bands => n_steps+1 bin edges
+        bins = np.linspace(min(z_all), max(z_all), n_steps + 1)
         dz = np.mean(np.diff(bins))
         # print('got bins = ', bins, 'with dz = ', dz)
         # y_all_abs = np.abs(self.y_all)
@@ -3973,16 +4014,30 @@ def calc_coverage_trend(self, z_all, y_all, is_archive):
 
         # print('got z_all_dig =', z_all_dig)
         trend_bin_means = [y_all_abs[z_all_dig == i].mean() for i in range(1, len(bins))]
+        # Replace NaN (empty bins) with 0 so table and plot both show all 10 depth bands
+        trend_bin_means = [float(m) if np.isfinite(m) else 0.0 for m in trend_bin_means]
         # bin_medians = [np.median(y_all_abs[z_all_dig == i]) for i in range(1, len(bins))]
         # print('got bin_means = ', trend_bin_means)
         trend_bin_centers = [i + dz/2 for i in bins[:-1]]
 
         if self.show_coverage_trend_chk.isChecked():
-            c_trend = ['black', 'gray'][is_archive]
-            trend_bin_means_plot = trend_bin_means + ([-1*i for i in trend_bin_means])
-            trend_bin_centers_plot = 2*trend_bin_centers
-            self.h_trend = self.swath_ax.scatter(trend_bin_means_plot, trend_bin_centers_plot,
-                                  marker='o', s=10, c=c_trend)
+            # Only draw trend for the source selected in Trend tab (so we get one set of 20 points, not one per dataset)
+            draw_trend = False
+            if hasattr(self, 'trend_source_cbox'):
+                selected = str(self.trend_source_cbox.currentText())
+                draw_trend = (is_archive and selected == 'Archive') or (not is_archive and selected == 'Swath')
+            else:
+                draw_trend = True
+            if draw_trend:
+                c_trend = ['black', 'gray'][is_archive]
+                trend_bin_means_plot = trend_bin_means + ([-1*i for i in trend_bin_means])
+                trend_bin_centers_plot = 2*trend_bin_centers
+                if not hasattr(self, 'trend_artists'):
+                    self.trend_artists = []
+                h = self.swath_ax.scatter(trend_bin_means_plot, trend_bin_centers_plot,
+                                          marker='o', s=10, c=c_trend)
+                self.h_trend = h
+                self.trend_artists.append(h)
             # self.h_trend = self.swath_ax.scatter(trend_bin_means, trend_bin_centers,
             # 					  marker='o', s=10, c=c_trend)
             # self.swath_ax.scatter([-1*i for i in trend_bin_means], trend_bin_centers,
@@ -3996,13 +4051,23 @@ def calc_coverage_trend(self, z_all, y_all, is_archive):
             self.trend_bin_centers = trend_bin_centers
             self.trend_bin_means = trend_bin_means
 
+        # Update Trend tab table, if present
+        try:
+            if hasattr(self, 'trend_table'):
+                update_trend_table_from_arrays(self, is_archive)
+        except Exception:
+            pass
+
     except RuntimeError:
         print('error calculating or plotting Gap Filler coverage')
 
 def export_gap_filler_trend(self):
     # export coverage trend for Gap Filler
     print('attempting to process and export trend for Gap Filler')
-    is_archive = str(self.export_gf_cbox.currentText()) == 'Archive'
+    # Use the source currently selected in the Trend tab (Swath/Archive)
+    is_archive = False
+    if hasattr(self, 'trend_source_cbox'):
+        is_archive = str(self.trend_source_cbox.currentText()) == 'Archive'
     print('is_archive =', is_archive)
     z = [self.trend_bin_centers, self.trend_bin_centers_arc][is_archive]
     y = [self.trend_bin_means, self.trend_bin_means_arc][is_archive]
@@ -4026,6 +4091,82 @@ def export_gap_filler_trend(self):
         current_path = self.export_save_dir.replace('\\', '/')
         trend_path = QtWidgets.QFileDialog.getSaveFileName(self, 'Save trend file', current_path + '/' + trend_name)
         fname_out = trend_path[0]
+
+
+def update_trend_table_from_arrays(self, is_archive=False):
+    """Populate the Trend tab table from the current trend_bin_centers / trend_bin_means arrays."""
+    if not hasattr(self, 'trend_table'):
+        return
+    z = [self.trend_bin_centers, self.trend_bin_centers_arc][is_archive]
+    y = [self.trend_bin_means, self.trend_bin_means_arc][is_archive]
+    table = self.trend_table
+    table.blockSignals(True)
+    table.setRowCount(len(z))
+    for i, (depth, width) in enumerate(zip(z, y)):
+        depth_item = QtWidgets.QTableWidgetItem(f"{depth:.2f}")
+        width_item = QtWidgets.QTableWidgetItem(f"{width:.2f}")
+        depth_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        width_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        table.setItem(i, 0, depth_item)
+        table.setItem(i, 1, width_item)
+    table.blockSignals(False)
+
+
+def trend_table_cell_changed(self, row, column):
+    """Handle edits in the Trend tab table and update the trend plot and export data."""
+    try:
+        # Use current trend source (Trend tab Source) for which data we're editing
+        is_archive = False
+        if hasattr(self, 'trend_source_cbox'):
+            is_archive = str(self.trend_source_cbox.currentText()) == 'Archive'
+        z = [self.trend_bin_centers, self.trend_bin_centers_arc][is_archive]
+        y = [self.trend_bin_means, self.trend_bin_means_arc][is_archive]
+        if row < 0 or row >= len(z):
+            return
+        item = self.trend_table.item(row, column)
+        if item is None:
+            return
+        try:
+            val = float(item.text())
+        except ValueError:
+            return
+        if column == 0:
+            z[row] = val
+        elif column == 1:
+            y[row] = val
+
+        # Write back updated arrays
+        if is_archive:
+            self.trend_bin_centers_arc = z
+            self.trend_bin_means_arc = y
+        else:
+            self.trend_bin_centers = z
+            self.trend_bin_means = y
+
+        # Replot coverage trend using updated arrays (for current source)
+        if hasattr(self, 'show_coverage_trend_chk') and self.show_coverage_trend_chk.isChecked():
+            c_trend = ['black', 'gray'][is_archive]
+            trend_bin_means_plot = y + ([-1 * i for i in y])
+            trend_bin_centers_plot = 2 * z
+            # Remove all existing trend artists (both new and archive) before replotting
+            if hasattr(self, 'trend_artists'):
+                for art in list(self.trend_artists):
+                    try:
+                        art.remove()
+                    except Exception:
+                        pass
+                self.trend_artists = []
+            else:
+                self.trend_artists = []
+
+            h = self.swath_ax.scatter(trend_bin_means_plot, trend_bin_centers_plot,
+                                      marker='o', s=10, c=c_trend)
+            self.h_trend = h
+            self.trend_artists.append(h)
+            self.swath_canvas.draw()
+    except Exception:
+        # Fail silently if anything unexpected happens; table edits shouldn't crash the app
+        pass
 
         print('trend fname_out = ', fname_out)
         
@@ -4635,8 +4776,9 @@ def plot_backscatter(self, det, is_archive=False, print_updates=False, det_name=
             self.y_all = y_all
             self.z_all = z_all
 
-        print('calling calc_coverage_trend from plot_backscatter')
-        calc_coverage_trend(self, z_all, y_all, is_archive)
+        if hasattr(self, 'show_coverage_trend_chk') and self.show_coverage_trend_chk.isChecked():
+            print('calling calc_coverage_trend from plot_backscatter')
+            calc_coverage_trend(self, z_all, y_all, is_archive)
 
         # Add overlays and helpers like the depth plot
         add_plot_features(self, self.backscatter_ax, is_archive)
@@ -4872,8 +5014,9 @@ def plot_pingmode(self, det, is_archive=False, print_updates=False, det_name='de
         self.y_all = y_all
         self.z_all = z_all
 
-    print('calling calc_coverage_trend from plot_pingmode')
-    calc_coverage_trend(self, z_all, y_all, is_archive)
+    if hasattr(self, 'show_coverage_trend_chk') and self.show_coverage_trend_chk.isChecked():
+        print('calling calc_coverage_trend from plot_pingmode')
+        calc_coverage_trend(self, z_all, y_all, is_archive)
 
     # Add overlays and helpers like the depth plot
     add_plot_features(self, self.pingmode_ax, is_archive)
@@ -5127,8 +5270,9 @@ def plot_pulseform(self, det, is_archive=False, print_updates=False, det_name='d
             self.y_all = y_all
             self.z_all = z_all
 
-        print('calling calc_coverage_trend from plot_pulseform')
-        calc_coverage_trend(self, z_all, y_all, is_archive)
+        if hasattr(self, 'show_coverage_trend_chk') and self.show_coverage_trend_chk.isChecked():
+            print('calling calc_coverage_trend from plot_pulseform')
+            calc_coverage_trend(self, z_all, y_all, is_archive)
 
         # Add overlays and helpers like the depth plot
         add_plot_features(self, self.pulseform_ax, is_archive)
@@ -5422,8 +5566,9 @@ def plot_swathmode(self, det, is_archive=False, print_updates=False, det_name='d
             self.y_all = y_all
             self.z_all = z_all
 
-        print('calling calc_coverage_trend from plot_swathmode')
-        calc_coverage_trend(self, z_all, y_all, is_archive)
+        if hasattr(self, 'show_coverage_trend_chk') and self.show_coverage_trend_chk.isChecked():
+            print('calling calc_coverage_trend from plot_swathmode')
+            calc_coverage_trend(self, z_all, y_all, is_archive)
 
         # Add overlays and helpers like the depth plot
         add_plot_features(self, self.swathmode_ax, is_archive)
@@ -5639,8 +5784,9 @@ def plot_frequency(self, det, is_archive=False, print_updates=False, det_name='d
             self.y_all = y_all
             self.z_all = z_all
 
-        print('calling calc_coverage_trend from plot_frequency')
-        calc_coverage_trend(self, z_all, y_all, is_archive)
+        if hasattr(self, 'show_coverage_trend_chk') and self.show_coverage_trend_chk.isChecked():
+            print('calling calc_coverage_trend from plot_frequency')
+            calc_coverage_trend(self, z_all, y_all, is_archive)
         
         # Add overlays and helpers like the depth plot
         add_plot_features(self, self.frequency_ax, is_archive)
