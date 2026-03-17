@@ -2006,6 +2006,12 @@ class MainWindow(QtWidgets.QMainWindow):
         calc_group_layout = BoxLayout([calc_btn_layout, trend_source_layout, trend_steps_layout], 'v')
         calc_groupbox = GroupBox('Calculate', calc_group_layout, False, False, 'trend_calc_gb')
 
+        self.edit_width_btn = PushButton('Edit Depth Band Width', 180, 20, 'edit_width_btn',
+                                         'Drag trend dots on the plot to adjust width per depth band')
+        self.edit_width_btn.clicked.connect(self._handle_edit_width_toggled)
+        edit_width_layout = BoxLayout([self.edit_width_btn], 'h')
+        edit_width_gb = GroupBox('Edit Width', edit_width_layout, False, False, 'edit_width_gb')
+
         self.trend_table = QtWidgets.QTableWidget(0, 2, self.trend_tab)
         self.trend_table.setHorizontalHeaderLabels(['Depth (m)', 'Width (m)'])
         self.trend_table.horizontalHeader().setStretchLastSection(True)
@@ -2016,6 +2022,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.trend_table.setStyleSheet('QTableWidget { gridline-color: #888888; }')
         trend_tab_layout = QtWidgets.QVBoxLayout()
         trend_tab_layout.addWidget(calc_groupbox, 0)
+        trend_tab_layout.addWidget(edit_width_gb, 0)
         trend_tab_layout.addWidget(self.trend_table, 1)
         # Attach Export Trend groupbox at the bottom of the Trend tab
         trend_tab_layout.addWidget(self.export_trend_gb, 0)
@@ -2089,6 +2096,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self.trend_artists = []
             if hasattr(self, 'swath_canvas'):
                 self.swath_canvas.draw()
+
+    def _handle_edit_width_toggled(self):
+        """Toggle drag-to-edit mode for trend width on the plot."""
+        if getattr(self, '_trend_width_edit_mode', False):
+            stop_trend_width_edit(self)
+            self._trend_width_edit_mode = False
+            self.edit_width_btn.setText('Edit Depth Band Width')
+        else:
+            if start_trend_width_edit(self):
+                self._trend_width_edit_mode = True
+                self.edit_width_btn.setText('Click Here to Stop Editing')
+            # else nothing to edit (no trend on plot)
 
 
     def add_pkl_files_from_directory(self):

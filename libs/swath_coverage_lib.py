@@ -4112,6 +4112,154 @@ def update_trend_table_from_arrays(self, is_archive=False):
     table.blockSignals(False)
 
 
+def _trend_edit_get_source_arrays(self):
+    """Return (is_archive, z_list, y_list) for current trend source; or (None, None, None) if not available."""
+    is_archive = False
+    if hasattr(self, 'trend_source_cbox'):
+        is_archive = str(self.trend_source_cbox.currentText()) == 'Archive'
+    z = [self.trend_bin_centers, self.trend_bin_centers_arc][is_archive]
+    y = [self.trend_bin_means, self.trend_bin_means_arc][is_archive]
+    if not z or not y:
+        return None, None, None
+    return is_archive, z, y
+
+
+def _on_trend_pick(self, event):
+    """Start drag: record which trend point (band/side) was picked; show original in blue."""
+    if not getattr(self, '_trend_width_edit_mode', False):
+        return
+    if not hasattr(self, 'h_trend') or event.artist != self.h_trend:
+        return
+    if not event.ind:
+        return
+    self._trend_drag_ind = int(event.ind[0])
+    self._trend_dragging = True
+    # Store original position and default color; add blue marker at original position
+    offsets = self.h_trend.get_offsets()
+    self._trend_drag_original_xy = (float(offsets[self._trend_drag_ind, 0]), float(offsets[self._trend_drag_ind, 1]))
+    is_archive = False
+    if hasattr(self, 'trend_source_cbox'):
+        is_archive = str(self.trend_source_cbox.currentText()) == 'Archive'
+    self._trend_drag_default_color = ['black', 'gray'][is_archive]
+    self._trend_drag_original_artist = self.swath_ax.scatter(
+        [self._trend_drag_original_xy[0]], [self._trend_drag_original_xy[1]],
+        marker='o', s=50, c='blue', zorder=5, edgecolors='darkblue', linewidths=1.5)
+    if hasattr(self, 'swath_canvas'):
+        self.swath_canvas.draw_idle()
+
+
+def _on_trend_motion(self, event):
+    """While dragging, update width from x position and keep port/starboard symmetric."""
+    if not getattr(self, '_trend_dragging', False):
+        return
+    if event.inaxes != self.swath_ax or event.xdata is None:
+        return
+    if not hasattr(self, 'h_trend'):
+        return
+    is_archive, z, y = _trend_edit_get_source_arrays(self)
+    if z is None:
+        return
+    n = len(y)
+    ind = self._trend_drag_ind
+    if ind < n:
+        band = ind  # starboard point
+    else:
+        band = ind - n  # port point
+    new_width = max(0.0, abs(float(event.xdata)))
+    y[band] = new_width
+    # Update scatter offsets: order is [starboard 0..n-1, port 0..n-1]
+    offsets = self.h_trend.get_offsets()
+    depth = float(z[band])
+    offsets[band] = [new_width, depth]
+    offsets[n + band] = [-new_width, depth]
+    self.h_trend.set_offsets(offsets)
+    # Color the dragged point red, others keep default
+    n_pts = len(offsets)
+    default = getattr(self, '_trend_drag_default_color', 'black')
+    colors = [default] * n_pts
+    colors[self._trend_drag_ind] = 'red'
+    self.h_trend.set_facecolors(colors)
+    update_trend_table_from_arrays(self, is_archive)
+    if hasattr(self, 'swath_canvas'):
+        self.swath_canvas.draw_idle()
+
+
+def _on_trend_release(self, event):
+    """End drag: remove blue original marker and restore trend point colors."""
+    self._trend_dragging = False
+    # Remove blue marker at original position
+    if hasattr(self, '_trend_drag_original_artist') and self._trend_drag_original_artist:
+        try:
+            self._trend_drag_original_artist.remove()
+        except Exception:
+            pass
+        self._trend_drag_original_artist = None
+    # Restore uniform color on trend scatter
+    if hasattr(self, 'h_trend') and self.h_trend and hasattr(self, '_trend_drag_default_color'):
+        n_pts = len(self.h_trend.get_offsets())
+        self.h_trend.set_facecolors([self._trend_drag_default_color] * n_pts)
+    if hasattr(self, 'swath_canvas'):
+        self.swath_canvas.draw_idle()
+
+
+def start_trend_width_edit(self):
+    """Enable drag-to-edit of trend dots on the swath plot. Returns True if enabled."""
+    if not hasattr(self, 'h_trend') or self.h_trend is None:
+        return False
+    if not hasattr(self, 'swath_canvas'):
+        return False
+    self._trend_width_edit_mode = True
+    self._trend_dragging = False
+    self.h_trend.set_picker(True)
+    self.h_trend.set_pickradius(8)
+    cid_pick = self.swath_canvas.mpl_connect('pick_event', lambda e: _on_trend_pick(self, e))
+    cid_motion = self.swath_canvas.mpl_connect('motion_notify_event', lambda e: _on_trend_motion(self, e))
+    cid_release = self.swath_canvas.mpl_connect('button_release_event', lambda e: _on_trend_release(self, e))
+    self._trend_edit_cids = [cid_pick, cid_motion, cid_release]
+    return True
+
+
+def stop_trend_width_edit(self):
+    """Disable drag-to-edit and disconnect event handlers; redraw trend from stored arrays so no duplicate points."""
+    self._trend_width_edit_mode = False
+    self._trend_dragging = False
+    # Remove blue original marker if still present
+    if hasattr(self, '_trend_drag_original_artist') and self._trend_drag_original_artist:
+        try:
+            self._trend_drag_original_artist.remove()
+        except Exception:
+            pass
+        self._trend_drag_original_artist = None
+    if hasattr(self, '_trend_edit_cids') and hasattr(self, 'swath_canvas'):
+        for cid in self._trend_edit_cids:
+            try:
+                self.swath_canvas.mpl_disconnect(cid)
+            except Exception:
+                pass
+        self._trend_edit_cids = []
+    # Remove existing trend scatter(s) and redraw a single trend from stored arrays (edited positions only)
+    if hasattr(self, 'trend_artists'):
+        for art in list(self.trend_artists):
+            try:
+                art.remove()
+            except Exception:
+                pass
+        self.trend_artists = []
+    if (hasattr(self, 'show_coverage_trend_chk') and self.show_coverage_trend_chk.isChecked() and
+            hasattr(self, 'swath_ax')):
+        is_archive, z, y = _trend_edit_get_source_arrays(self)
+        if z is not None and y is not None:
+            c_trend = ['black', 'gray'][is_archive]
+            trend_bin_means_plot = y + ([-1 * i for i in y])
+            trend_bin_centers_plot = 2 * z
+            h = self.swath_ax.scatter(trend_bin_means_plot, trend_bin_centers_plot,
+                                      marker='o', s=10, c=c_trend)
+            self.h_trend = h
+            self.trend_artists = [h]
+    if hasattr(self, 'swath_canvas'):
+        self.swath_canvas.draw_idle()
+
+
 def trend_table_cell_changed(self, row, column):
     """Handle edits in the Trend tab table and update the trend plot and export data."""
     try:
@@ -4133,6 +4281,12 @@ def trend_table_cell_changed(self, row, column):
         if column == 0:
             z[row] = val
         elif column == 1:
+            # Swath width must be non-negative
+            if val < 0:
+                val = 0.0
+                self.trend_table.blockSignals(True)
+                item.setText(f"{val:.2f}")
+                self.trend_table.blockSignals(False)
             y[row] = val
 
         # Write back updated arrays
