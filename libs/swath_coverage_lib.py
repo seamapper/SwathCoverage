@@ -267,6 +267,24 @@ def update_button_states(self):
     if hasattr(self, 'scan_params_btn'):
         self.scan_params_btn.setEnabled(has_files)
 
+def _format_coord_3dec(ax_default_format_coord):
+    """Return a formatter that shows x,y with 3 decimal places for the toolbar (avoids scientific notation)."""
+    def formatter(x, y):
+        try:
+            return f'{float(x):.3f}, {float(y):.3f}'
+        except (TypeError, ValueError):
+            return ax_default_format_coord(x, y) if ax_default_format_coord else f'{x}, {y}'
+    return formatter
+
+
+def _set_axis_coord_format_3dec(ax):
+    """Set axis to display coordinates with 3 decimal places in the navigation toolbar."""
+    if ax is None:
+        return
+    default = getattr(ax, 'format_coord', None)
+    ax.format_coord = _format_coord_3dec(default)
+
+
 def init_all_axes(self):
     init_swath_ax(self)
     init_backscatter_ax(self)
@@ -277,6 +295,11 @@ def init_all_axes(self):
     init_data_ax(self)
     init_time_ax(self)
     # init_param_ax(self)
+    # Set toolbar coordinate display to 3 decimal places (no scientific notation)
+    for ax in [getattr(self, a, None) for a in [
+            'swath_ax', 'hist_ax', 'backscatter_ax', 'pingmode_ax', 'pulseform_ax',
+            'swathmode_ax', 'frequency_ax', 'data_rate_ax1', 'data_rate_ax2', 'time_ax1']]:
+        _set_axis_coord_format_3dec(ax)
     # self.cbar_dict = {'swath': {'cax': self.cbar_ax1, 'ax': self.swath_ax, 'clim': self.clim, 'loc': 1, 'tickloc': 'left'},
     # 				  'data_rate': {'cax': self.cbar_ax2, 'ax': self.data_rate_ax1, 'clim': self.clim, 'loc': 2, 'tickloc': 'right'},
     # 				  'ping_interval': {'cax': self.cbar_ax3, 'ax': self.data_rate_ax2, 'clim': self.clim, 'loc': 1, 'tickloc': 'left'}}
@@ -590,6 +613,26 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
             sender = 'NA'
 
     clear_plot(self)
+
+    # When primary filters (Angle/Depth/Backscatter) are on and custom limits off, ensure bounds
+    # start at zero so plot_coverage builds them only from filtered data.
+    try:
+        primary_filters_on = (getattr(self, 'angle_gb', None) and self.angle_gb.isChecked()) or \
+                             (getattr(self, 'depth_gb', None) and self.depth_gb.isChecked()) or \
+                             (getattr(self, 'bs_gb', None) and self.bs_gb.isChecked())
+        if primary_filters_on and getattr(self, 'plot_lim_gb', None) and not self.plot_lim_gb.isChecked():
+            self.x_max = 0.0
+            self.z_max = 0.0
+            if hasattr(self, 'x_max_custom'):
+                self.x_max_custom = 0.0
+            if hasattr(self, 'z_max_custom'):
+                self.z_max_custom = 0.0
+            if hasattr(self, 'dr_max_custom'):
+                self.dr_max_custom = 0.0
+            if hasattr(self, 'pi_max_custom'):
+                self.pi_max_custom = 0.0
+    except Exception:
+        pass
 
     # update top data plot combobox based on show_data checks
     if sender in ['show_data_chk', 'show_data_chk_arc', 'calc_coverage_btn', 'load_archive_btn']:
@@ -1068,12 +1111,14 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
     except Exception:
         primary_filters_active = False
 
-    if primary_filters_active and (not self.plot_lim_gb.isChecked()):
+    # Use filtered data bounds when any primary filter is on (custom limits can still override in update_plot_limits).
+    if primary_filters_active:
         y_f = np.asarray(y_all)[filter_idx]
         z_f = np.asarray(z_all)[filter_idx]
         if y_f.size and z_f.size:
             self.x_max = max([self.x_max, np.nanmax(np.abs(y_f))])
             self.z_max = max([self.z_max, np.nanmax(z_f)])
+        # else: leave self.x_max/self.z_max unchanged (e.g. keep 0 from clear_plot if no points pass)
     else:
         self.x_max = max([self.x_max, np.nanmax(np.abs(np.asarray(y_all)))])
         self.z_max = max([self.z_max, np.nanmax(np.asarray(z_all))])
@@ -2312,6 +2357,20 @@ def update_axes(self):
 
 
 def update_plot_limits(self):
+    # When scaling to filtered data, do not retain old full-data custom values.
+    try:
+        primary_filters_on = (getattr(self, 'angle_gb', None) and self.angle_gb.isChecked()) or \
+                             (getattr(self, 'depth_gb', None) and self.depth_gb.isChecked()) or \
+                             (getattr(self, 'bs_gb', None) and self.bs_gb.isChecked())
+        if primary_filters_on and getattr(self, 'plot_lim_gb', None) and not self.plot_lim_gb.isChecked():
+            self.x_max_custom = 0.0
+            self.z_max_custom = 0.0
+            if hasattr(self, 'dr_max_custom'):
+                self.dr_max_custom = 0.0
+            if hasattr(self, 'pi_max_custom'):
+                self.pi_max_custom = 0.0
+    except Exception:
+        pass
     # expand custom limits to accommodate new data
     self.x_max_custom = max([self.x_max, self.x_max_custom])
     self.z_max_custom = max([self.z_max, self.z_max_custom])
