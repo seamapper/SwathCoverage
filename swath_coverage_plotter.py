@@ -646,6 +646,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     # self.data_canvas.draw_idle()
                     text_all = [self.fnames_sorted[n] for n in ind["ind"]]  # fnames sorted per data plots
                     self.sounding_fname = text_all[0].replace('[\'','').replace('\']','')
+                    # Display only the filename in the bottom-left cursor status
+                    self.sounding_fname = os.path.basename(self.sounding_fname)
 
                     self.sounding_file_lbl.setText('Cursor: ' + self.sounding_fname)
                     return  # leave after updating
@@ -673,6 +675,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     text_all = [self.fnames_all[n] for n in ind["ind"]]  # fnames_all from plot_coverage step
                     # print('got text_all =', text_all)
                     self.sounding_fname = text_all[0].replace('[\'','').replace('\']','')
+                    # Display only the filename in the bottom-left cursor status
+                    self.sounding_fname = os.path.basename(self.sounding_fname)
                     # print('got sounding fname = ', self.sounding_fname)
 
                     # self.update_annotation(ind)
@@ -1671,7 +1675,8 @@ class MainWindow(QtWidgets.QMainWindow):
         width_layout_center = BoxLayout([QtWidgets.QLabel('Swath'), self.min_width_tb, self.max_width_tb], 'v')
         width_layout_right = BoxLayout([QtWidgets.QLabel('Archive'), self.min_width_arc_tb, self.max_width_arc_tb], 'v')
         width_layout = BoxLayout([width_layout_left, width_layout_center, width_layout_right], 'h')
-        self.width_gb = GroupBox('Width (Swath/Archive)', width_layout, False, False, 'width_gb')
+        # Checkable groupbox (off by default) to enable/disable width filtering
+        self.width_gb = GroupBox('Width (Swath/Archive)', width_layout, True, False, 'width_gb')
         self.width_gb.setToolTip('Hide data by absolute swath coverage width (m).\n\n'
                                  'Points are filtered using abs(swath_coverage).\n\n'
                                  'Acceptable min/max fall within [0 inf].')
@@ -2023,7 +2028,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         trend_steps_layout = BoxLayout([trend_steps_lbl, self.trend_steps_cbox], 'h')
 
-        self.trend_method_cbox = ComboBox(['Mean', 'Mean + StdDev', 'Mean + (2 * StdDev)'], 160, 20, 'trend_method_cbox',
+        self.trend_method_cbox = ComboBox(['Mean', 'Mean + StdDev', 'Mean + (2 * StdDev)', 'Spline'], 160, 20, 'trend_method_cbox',
                                           'Method used to compute width per depth band from absolute coverage |y|')
         self.trend_method_cbox.setCurrentText('Mean')
         trend_method_lbl = Label('Method:', width=50,

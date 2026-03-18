@@ -55,7 +55,7 @@ from matplotlib import colorbar
 from matplotlib import patches
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, UnivariateSpline
 from time import process_time
 import pickle
 import re
@@ -4047,7 +4047,25 @@ def calc_coverage_trend(self, z_all, y_all, is_archive):
             except Exception:
                 method = 'Mean'
 
-        if method == 'Mean + StdDev':
+        if method == 'Spline':
+            base_means = [y_all_abs[z_all_dig == i].mean() for i in range(1, len(bins))]
+            base_means = np.asarray([float(m) if np.isfinite(m) else 0.0 for m in base_means], dtype=float)
+            z_centers = np.asarray([i + dz / 2 for i in bins[:-1]], dtype=float)
+            # Fit spline to non-zero bins and force an anchor at (0,0)
+            keep = np.isfinite(z_centers) & np.isfinite(base_means) & (base_means > 0)
+            if np.sum(keep) >= 4:
+                z_fit = np.concatenate(([0.0], z_centers[keep]))
+                w_fit = np.concatenate(([0.0], base_means[keep]))
+                # Weight the anchor strongly so spline starts at (0,0)
+                wts = np.concatenate(([50.0], np.ones(np.sum(keep), dtype=float)))
+                # Smoothing factor scaled to data variance (avoid oscillations)
+                s_val = float(max(1e-6, len(w_fit) * np.nanvar(w_fit) * 0.25))
+                spl = UnivariateSpline(z_fit, w_fit, w=wts, k=3, s=s_val)
+                trend_bin_means = spl(z_centers).astype(float).tolist()
+            else:
+                # Not enough points for spline; fall back to mean
+                trend_bin_means = base_means.tolist()
+        elif method == 'Mean + StdDev':
             trend_bin_means = [
                 (y_all_abs[z_all_dig == i].mean() + y_all_abs[z_all_dig == i].std())
                 for i in range(1, len(bins))
@@ -4061,7 +4079,7 @@ def calc_coverage_trend(self, z_all, y_all, is_archive):
             trend_bin_means = [y_all_abs[z_all_dig == i].mean() for i in range(1, len(bins))]
 
         # Replace NaN (empty bins) with 0 so table and plot show all depth bands
-        trend_bin_means = [float(m) if np.isfinite(m) else 0.0 for m in trend_bin_means]
+        trend_bin_means = [max(0.0, float(m)) if np.isfinite(m) else 0.0 for m in trend_bin_means]
         # bin_medians = [np.median(y_all_abs[z_all_dig == i]) for i in range(1, len(bins))]
         # print('got bin_means = ', trend_bin_means)
         trend_bin_centers = [i + dz/2 for i in bins[:-1]]
@@ -4084,6 +4102,25 @@ def calc_coverage_trend(self, z_all, y_all, is_archive):
                                           marker='o', s=10, c=c_trend)
                 self.h_trend = h
                 self.trend_artists.append(h)
+                # If using spline method, also draw a smooth curve through the trend
+                try:
+                    if hasattr(self, 'trend_method_cbox') and str(self.trend_method_cbox.currentText()) == 'Spline':
+                        zc = np.asarray(trend_bin_centers, dtype=float)
+                        wc = np.asarray(trend_bin_means, dtype=float)
+                        keep = np.isfinite(zc) & np.isfinite(wc) & (wc >= 0)
+                        if np.sum(keep) >= 4:
+                            z_fit = np.concatenate(([0.0], zc[keep]))
+                            w_fit = np.concatenate(([0.0], wc[keep]))
+                            wts = np.concatenate(([50.0], np.ones(np.sum(keep), dtype=float)))
+                            s_val = float(max(1e-6, len(w_fit) * np.nanvar(w_fit) * 0.25))
+                            spl = UnivariateSpline(z_fit, w_fit, w=wts, k=3, s=s_val)
+                            z_line = np.linspace(0.0, float(np.nanmax(zc[keep])), 200)
+                            w_line = np.maximum(0.0, spl(z_line))
+                            line1, = self.swath_ax.plot(w_line, z_line, color=c_trend, linewidth=1.0)
+                            line2, = self.swath_ax.plot(-w_line, z_line, color=c_trend, linewidth=1.0)
+                            self.trend_artists.extend([line1, line2])
+                except Exception:
+                    pass
             # self.h_trend = self.swath_ax.scatter(trend_bin_means, trend_bin_centers,
             # 					  marker='o', s=10, c=c_trend)
             # self.swath_ax.scatter([-1*i for i in trend_bin_means], trend_bin_centers,
