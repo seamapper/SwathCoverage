@@ -38,7 +38,8 @@ Key Features:
 # __version__ = "2025.10"  # Reorganized sources area into tabs   
 # __version__ = "2025.11"  # Fixed plot decimation to only run when filter settings are changed
 # __version__ = "2025.12"  # Fixed layout for swath pkl and archive pkl management
-__version__ = "2026.01"  # Added dark theme and updated layout for swath pkl and archive pkl management
+# __version__ = "2026.01"  # Added dark theme and updated layout for swath pkl and archive pkl management
+__version__ = "2026.02"  # Added coverage trend calculation and editing capabilities
 
 # BSD-3-Clause License
 #
@@ -376,6 +377,8 @@ class MainWindow(QtWidgets.QMainWindow):
                   self.min_angle_tb, self.max_angle_tb,
                   self.min_depth_arc_tb, self.max_depth_arc_tb,
                   self.min_depth_tb, self.max_depth_tb,
+                  self.min_width_arc_tb, self.max_width_arc_tb,
+                  self.min_width_tb, self.max_width_tb,
                   self.min_bs_tb, self.max_bs_tb,
                   self.rtp_angle_buffer_tb,
                   self.rtp_cov_buffer_tb,
@@ -439,6 +442,8 @@ class MainWindow(QtWidgets.QMainWindow):
             ([self.min_angle_tb, self.max_angle_tb], self.angle_gb, True),
             # Depth filter - should always look enabled (like Limit plotted point count)
             ([self.min_depth_tb, self.max_depth_tb, self.min_depth_arc_tb, self.max_depth_arc_tb], self.depth_gb, True),
+            # Width filter - should always look enabled (like Depth filter)
+            ([self.min_width_tb, self.max_width_tb, self.min_width_arc_tb, self.max_width_arc_tb], self.width_gb, True),
             # Backscatter filter - always show as enabled
             ([self.min_bs_tb, self.max_bs_tb], self.bs_gb, True),
             # Hide angles filter - always show as enabled
@@ -1651,6 +1656,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.depth_gb = GroupBox('Depth (swath/archive)', depth_layout, True, False, 'depth_gb')
         self.depth_gb.setToolTip('Hide data by depth (m, positive down).\n\nAcceptable min/max fall within [0 inf].')
 
+        # add custom swath-width (absolute coverage) limits
+        min_width_lbl = Label('Min Width (m):', alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        max_width_lbl = Label('Max Width (m):', alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        self.min_width_tb = LineEdit('0', 40, 20, 'min_width_tb', 'Min swath width (absolute coverage) of the swath data')
+        self.min_width_arc_tb = LineEdit('0', 40, 20, 'min_width_arc_tb', 'Min swath width (absolute coverage) of the archive data')
+        self.max_width_tb = LineEdit('30000', 40, 20, 'max_width_tb', 'Max swath width (absolute coverage) of the swath data')
+        self.max_width_arc_tb = LineEdit('30000', 40, 20, 'max_width_arc_tb', 'Max swath width (absolute coverage) of the archive data')
+        self.min_width_tb.setValidator(QDoubleValidator(0, float(self.max_width_tb.text()), 2))
+        self.max_width_tb.setValidator(QDoubleValidator(float(self.min_width_tb.text()), np.inf, 2))
+        self.min_width_arc_tb.setValidator(QDoubleValidator(0, float(self.max_width_arc_tb.text()), 2))
+        self.max_width_arc_tb.setValidator(QDoubleValidator(float(self.min_width_arc_tb.text()), np.inf, 2))
+        width_layout_left = BoxLayout([QtWidgets.QLabel(''), min_width_lbl, max_width_lbl], 'v')
+        width_layout_center = BoxLayout([QtWidgets.QLabel('Swath'), self.min_width_tb, self.max_width_tb], 'v')
+        width_layout_right = BoxLayout([QtWidgets.QLabel('Archive'), self.min_width_arc_tb, self.max_width_arc_tb], 'v')
+        width_layout = BoxLayout([width_layout_left, width_layout_center, width_layout_right], 'h')
+        self.width_gb = GroupBox('Width (Swath/Archive)', width_layout, False, False, 'width_gb')
+        self.width_gb.setToolTip('Hide data by absolute swath coverage width (m).\n\n'
+                                 'Points are filtered using abs(swath_coverage).\n\n'
+                                 'Acceptable min/max fall within [0 inf].')
+
         # add custom reported backscatter limits
         min_bs_lbl = Label('Min:', width=50, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         self.min_bs_tb = LineEdit('-50', 40, 20, 'min_bs_tb',
@@ -1971,7 +1996,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # set up tab 2: filtering options
         self.tab2 = QtWidgets.QWidget()
-        self.tab2_layout = BoxLayout([self.angle_gb, self.depth_gb, self.bs_gb, self.ping_int_gb, self.rtp_angle_gb,
+        self.tab2_layout = BoxLayout([self.angle_gb, self.depth_gb, self.width_gb, self.bs_gb, self.ping_int_gb, self.rtp_angle_gb,
                                       self.rtp_cov_gb, self.pt_count_gb, self.swath_pkl_dec_gb], 'v')
         self.tab2_layout.addStretch()
         self.tab2.setLayout(self.tab2_layout)
@@ -1998,12 +2023,19 @@ class MainWindow(QtWidgets.QMainWindow):
                                alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         trend_steps_layout = BoxLayout([trend_steps_lbl, self.trend_steps_cbox], 'h')
 
+        self.trend_method_cbox = ComboBox(['Mean', 'Mean + StdDev', 'Mean + (2 * StdDev)'], 160, 20, 'trend_method_cbox',
+                                          'Method used to compute width per depth band from absolute coverage |y|')
+        self.trend_method_cbox.setCurrentText('Mean')
+        trend_method_lbl = Label('Method:', width=50,
+                                 alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        trend_method_layout = BoxLayout([trend_method_lbl, self.trend_method_cbox], 'h')
+
         self.calc_trend_btn = PushButton('Calculate Coverage Trend', 140, 20, 'calc_trend_btn',
                                          'Calculate coverage trend from current filtered data')
         self.calc_trend_btn.clicked.connect(self._handle_calc_trend_clicked)
         calc_btn_layout = BoxLayout([self.calc_trend_btn], 'h')
 
-        calc_group_layout = BoxLayout([calc_btn_layout, trend_source_layout, trend_steps_layout], 'v')
+        calc_group_layout = BoxLayout([calc_btn_layout, trend_source_layout, trend_method_layout, trend_steps_layout], 'v')
         calc_groupbox = GroupBox('Calculate', calc_group_layout, False, False, 'trend_calc_gb')
 
         self.edit_width_btn = PushButton('Edit Depth Band Width', 180, 20, 'edit_width_btn',
@@ -2031,6 +2063,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.trend_table.cellChanged.connect(lambda row, col: trend_table_cell_changed(self, row, col))
         # When # of Steps changes, refresh plot so trend is recalculated and redrawn
         self.trend_steps_cbox.currentTextChanged.connect(lambda: refresh_plot(self))
+        # When Method changes, refresh plot so trend is recalculated and redrawn
+        self.trend_method_cbox.currentTextChanged.connect(lambda: refresh_plot(self))
 
         # add tabs to tab layout (Trend before Search)
         self.tabs.addTab(self.tab1, 'Plot')

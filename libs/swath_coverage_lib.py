@@ -604,6 +604,25 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
             # If any UI element is missing, skip silently
             pass
 
+        # If width filter is enabled, sync custom Swath Width (x-limit) to Max Width once.
+        try:
+            width_gb = getattr(self, 'width_gb', None)
+            if width_gb is not None:
+                if not width_gb.isChecked() and hasattr(self, '_width_limits_synced'):
+                    self._width_limits_synced = False
+                if width_gb.isChecked() and getattr(self, 'plot_lim_gb', None):
+                    if not hasattr(self, '_width_limits_synced'):
+                        self._width_limits_synced = False
+                    if not self._width_limits_synced:
+                        if not self.plot_lim_gb.isChecked():
+                            self.plot_lim_gb.setChecked(True)
+                        # Copy Max Width (swath) into custom swath width limit
+                        if hasattr(self, 'max_width_tb') and hasattr(self, 'max_x_tb'):
+                            self.max_x_tb.setText(self.max_width_tb.text())
+                        self._width_limits_synced = True
+        except Exception:
+            pass
+
     # If primary data filters are enabled, auto-switch Depth colormap scaling to "Filtered data".
     try:
         primary_filters_active = bool(getattr(self, 'angle_gb', None) and self.angle_gb.isChecked()) or \
@@ -1059,6 +1078,7 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
     idx_shape = np.shape(np.asarray(z_all))
     angle_idx = np.ones(idx_shape)
     depth_idx = np.ones(idx_shape)
+    width_idx = np.ones(idx_shape)
     bs_idx = np.ones(idx_shape)
     rtp_angle_idx = np.ones(idx_shape)  # idx of angles that fall within the runtime params for RX beam angles
     rtp_cov_idx = np.ones(idx_shape)  # idx of soundings that fall within the runtime params for max coverage
@@ -1079,6 +1099,12 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
             lims = [float(self.min_depth_arc_tb.text()), float(self.max_depth_arc_tb.text())]
 
         depth_idx = np.logical_and(np.asarray(z_all) >= lims[0], np.asarray(z_all) <= lims[1])
+
+    if hasattr(self, 'width_gb') and self.width_gb.isChecked():  # get idx satisfying current width filter
+        lims = [float(self.min_width_tb.text()), float(self.max_width_tb.text())]
+        if is_archive and hasattr(self, 'min_width_arc_tb'):
+            lims = [float(self.min_width_arc_tb.text()), float(self.max_width_arc_tb.text())]
+        width_idx = np.logical_and(np.abs(np.asarray(y_all)) >= lims[0], np.abs(np.asarray(y_all)) <= lims[1])
 
     if self.bs_gb.isChecked():  # get idx satisfying current backscatter filter; BS in 0.1 dB, multiply lims by 10
         # lims = [10 * float(self.min_bs_tb.text()), 10 * float(self.max_bs_tb.text())]
@@ -1135,7 +1161,7 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
             update_log(self, 'Failure comparing coverage to runtime params; no coverage filter applied')
 
     # apply filter masks to x, z, angle, and bs fields
-    filter_idx = np.logical_and.reduce((angle_idx, depth_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx))
+    filter_idx = np.logical_and.reduce((angle_idx, depth_idx, width_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx))
 
     # Update x and z max for axis resizing.
     # If Angle/Depth/Backscatter filters are enabled and custom plot limits are OFF,
@@ -1561,6 +1587,7 @@ def validate_filter_text(self):
     valid_filters = True
     tb_list = [self.min_angle_tb, self.max_angle_tb,
                self.min_depth_tb, self.max_depth_tb, self.min_depth_arc_tb, self.max_depth_arc_tb,
+               self.min_width_tb, self.max_width_tb, self.min_width_arc_tb, self.max_width_arc_tb,
                self.min_bs_tb, self.max_bs_tb, self.rtp_angle_buffer_tb, self.rtp_cov_buffer_tb]
 
     for tb in tb_list:
@@ -4013,8 +4040,27 @@ def calc_coverage_trend(self, z_all, y_all, is_archive):
         z_all_dig = np.digitize(z_all, bins)
 
         # print('got z_all_dig =', z_all_dig)
-        trend_bin_means = [y_all_abs[z_all_dig == i].mean() for i in range(1, len(bins))]
-        # Replace NaN (empty bins) with 0 so table and plot both show all 10 depth bands
+        method = 'Mean'
+        if hasattr(self, 'trend_method_cbox'):
+            try:
+                method = str(self.trend_method_cbox.currentText())
+            except Exception:
+                method = 'Mean'
+
+        if method == 'Mean + StdDev':
+            trend_bin_means = [
+                (y_all_abs[z_all_dig == i].mean() + y_all_abs[z_all_dig == i].std())
+                for i in range(1, len(bins))
+            ]
+        elif method == 'Mean + (2 * StdDev)':
+            trend_bin_means = [
+                (y_all_abs[z_all_dig == i].mean() + 2.0 * y_all_abs[z_all_dig == i].std())
+                for i in range(1, len(bins))
+            ]
+        else:  # 'Mean'
+            trend_bin_means = [y_all_abs[z_all_dig == i].mean() for i in range(1, len(bins))]
+
+        # Replace NaN (empty bins) with 0 so table and plot show all depth bands
         trend_bin_means = [float(m) if np.isfinite(m) else 0.0 for m in trend_bin_means]
         # bin_medians = [np.median(y_all_abs[z_all_dig == i]) for i in range(1, len(bins))]
         # print('got bin_means = ', trend_bin_means)
