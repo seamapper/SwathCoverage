@@ -1,6 +1,6 @@
 # Swath Coverage Analysis Tools
 
-A comprehensive toolkit for analyzing swath coverage data from from Kongsberg multibeam systems. This project provides two main applications for processing, converting, and visualizing the swath coverage  data.
+A comprehensive toolkit for analyzing swath coverage data from Kongsberg multibeam systems. This project provides two main applications for processing, converting, and visualizing swath coverage data.
 
 **Center for Coastal and Ocean Mapping (CCOM) / Joint Hydrographic Center (JHC), University of New Hampshire**
 
@@ -10,6 +10,8 @@ This toolkit consists of two complementary applications:
 
 1. **KMALL to PKL Converter** - Converts raw KMALL/ALL files to optimized PKL format for faster processing
 2. **Swath Coverage Plotter** - Comprehensive GUI application for analyzing multibeam sonar data during a swath coverage test
+
+---
 
 ## Applications
 
@@ -34,7 +36,7 @@ python kmall_to_pkl_converter.py
 ```
 
 **Method 2: Windows Executable**
-```bash
+```
 KMALL_to_SwathPKL_Converter_v2026.01.exe
 ```
 Executables are named `KMALL_to_SwathPKL_Converter_v` + version from the code.
@@ -49,22 +51,27 @@ Executables are named `KMALL_to_SwathPKL_Converter_v` + version from the code.
 4. Optionally enable compression for smaller file sizes
 5. Click "Start Conversion" and monitor progress
 
+---
+
 ### 2. Swath Coverage Plotter
 
-A comprehensive GUI application for analyzing and visualizing multibeam echosounder data with extensive plotting and analysis capabilities.
+A comprehensive GUI application for analyzing and visualizing multibeam echosounder data with extensive plotting and analysis capabilities. The window is fixed at **1600 × 1100 px** and uses a dark Fusion theme.
 
 #### Key Features
-- **Multiple Data Sources**: Load raw KMALL/ALL files, Swath PKL files, or archived data (with optional Add Directory and Include Subdirectories for Swath PKL and Archive PKL; Show Path toggles for file lists)
+- **Multiple Data Sources**: Load raw KMALL/ALL files, Swath PKL files, or archived data
+  - Add Directory with optional subdirectory search for Swath PKL and Archive PKL
+  - Show Path toggle for each file list
+  - "Convert to Swath PKL" button with optional gzip compression
 - **Comprehensive Plotting**: Generate plots for depth, backscatter, ping mode, pulse form, swath mode, frequency, data rate, and timing
-- **Interactive Visualization**: Hover over data points to see file information
-- **Coverage Analysis**: Calculate and visualize swath coverage trends
-- **Data Filtering**: Filter by angle, depth, backscatter, ping interval, and runtime parameters
-- **Archive Management**: Archive processed data for later comparison; add archive PKL from directory with optional subdirectory search
-- **Export Functionality**: Export plots (Export Plots) and coverage trends (e.g., for Gap Filler)
+- **Interactive Visualization**: Hover over data points to see the source filename in the status bar
+- **Coverage Trend Analysis**: Calculate, edit, digitize, and export swath coverage trends
+- **Data Filtering**: Filter by angle, depth, width, backscatter, ping interval, and runtime parameters
+- **Archive Management**: Archive processed data for later comparison
+- **Export Functionality**: Save all plots and export coverage trends (e.g., for Gap Filler)
 - **Parameter Search**: Search acquisition parameters by mode, frequency, angles, and more
 - **Theoretical Performance**: Overlay theoretical coverage specification curves
 - **Session Persistence**: Remember directory preferences and settings
-- **Dark Theme**: Fusion style with dark palette for consistent GUI appearance regardless of system theme
+- **Dark Theme**: Fusion style with dark palette for consistent appearance
 
 #### Usage
 
@@ -74,20 +81,97 @@ python swath_coverage_plotter.py
 ```
 
 **Method 2: Windows Executable**
-```bash
-Swath_Coverage_Plotter_v2026.01.exe
+```
+Swath_Coverage_Plotter_v2026.03.exe
 ```
 Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 
 **Basic Workflow:**
 1. Launch the application
 2. Load data using one of the following methods:
-   - **Raw Files**: Add KMALL/ALL files and calculate coverage
-   - **Swath PKL**: Load pre-converted PKL files (faster)
-   - **Archive PKL**: Load previously archived data for comparison
-3. Configure plot settings (colors, limits, filters, etc.)
-4. Generate and explore plots across multiple tabs
-5. Export plots or coverage trends as needed
+   - **Raw Files tab**: Add KMALL/ALL files and click "Calc Coverage"
+   - **Swath PKL tab**: Load pre-converted PKL files (faster loading)
+   - **Archive PKL tab**: Load previously archived data for comparison
+3. Configure plot settings on the **Plot** tab (colors, limits, point style, etc.)
+4. Apply filters on the **Filter** tab as needed
+5. Explore plots across the nine center-panel tabs
+6. Use the **Trend** tab to calculate or digitize a coverage trend and export it
+
+---
+
+## GUI Layout
+
+### Left Panel — Sources & Log
+- **Sources** groupbox (tabbed):
+  - *Raw Files*: file list, Raw File Management, Process Raw Files (Calc Coverage, Scan Params Only, Convert to Swath PKL, Convert to Archive PKL)
+  - *Swath PKL*: file list, Swath PKL Management
+  - *Archive PKL*: file list, Archive PKL Management
+  - *Spec Curve*: specification curve files
+- **Export Plots** groupbox: Save All Plots button
+- **Activity Log**: color-coded scrolling log
+- **Status / Progress** area:
+  - Current file label (updates during processing)
+  - Cursor label (shows hovered filename)
+  - *Total Progress* bar (used when loading PKL files)
+  - *Converting to PKL* bar (appears only while "Convert to Swath PKL" is running; shows "File X of Y")
+
+### Center Panel — Plots (9 tabs)
+| Tab | Content |
+|---|---|
+| Depth | Main swath coverage scatter plot, colored by depth |
+| Backscatter | Backscatter intensity scatter plot |
+| Ping Mode | Depth mode over time |
+| Pulse Form | CW vs. FM pulse form over time |
+| Swath Mode | Single vs. Dual swath over time |
+| Frequency | Operating frequency over time |
+| Data Rate | Data acquisition rate over time |
+| Timing | Ping interval / timing analysis |
+| Parameters | Runtime parameter log (searchable) |
+
+### Right Panel — Controls (4 tabs, 240 px wide)
+
+#### Plot Tab
+- Custom system information (model, ship name, cruise)
+- Depth reference (Waterline / Origin / TX Array / Raw Data)
+- Point style (color mode, single color, opacity, point size)
+- Custom plot limits (depth, swath width, data rate, ping interval)
+- Swath angle reference lines
+- Water depth multiple lines
+- Other options: grid lines, colorbar, spec lines, histogram, **Show Coverage Trend**
+
+#### Filter Tab
+- **Angle** filter (on by default): Min/Max degrees
+- **Depth (swath/archive)** filter (on): separate ranges for new and archive data
+- **Width (swath/archive)** filter (off by default): Min/Max width in meters; enabling also sets the Swath Width custom plot limit
+- **Backscatter** filter (on): Min/Max dB
+- **Ping Interval** filter (on): Min/Max seconds
+- **Hide angles near runtime limits** (on): angle buffer
+- **Hide coverage near runtime limits** (on): coverage buffer
+- **Limit plotted point count** (on): max points and decimation factor
+- **Swath PKL Memory Management** (off): max points per file and decimation factor
+
+#### Trend Tab
+- **Show Coverage Trend** checkbox (mirrors the Plot tab checkbox, bidirectionally synced)
+- *Calculate* groupbox:
+  - **Calculate Coverage Trend** button
+  - **Source** pulldown (Swath / Archive)
+  - **Method** pulldown: Mean | Mean+σ | Mean+2σ | Spline
+  - **# of Steps** pulldown: 5 / 10 / 15 / 20 / 25 (default 10) — number of depth bands
+  - **Min Points** field (default 10): depth bands with fewer points are assigned width = 0
+- **Digitize Trend** button: click points directly on the depth plot to build the trend table; toggle button reads "Digitizing. Click here to stop." while active
+- *Edit Width* groupbox:
+  - **Edit Depth Band Width** button: drag trend points left/right on the depth plot for symmetric width adjustment; original point shown in blue, dragged position in red; negative widths are prevented
+- **Trend table**: three columns — Depth (m), Width (m), # Points (non-editable); grid lines visible
+- **Clear All Points** button: clears the entire trend table and underlying data
+- *Export* groupbox (visible only when Show Coverage Trend is on):
+  - **Export Gap Filler** button: exports the current trend as a Gap Filler import file
+
+#### Search Tab
+- Search acquisition parameters (ANY/ALL condition) with checkable rows for depth mode, swath mode, pulse form, swath angle, swath coverage, frequency
+- Installation parameter search (waterline, array offsets, position offsets)
+- Update Search and Save Search Log buttons
+
+---
 
 ## Installation
 
@@ -97,7 +181,7 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 - Python 3.8 or later
 - PyQt6 (GUI framework)
 - NumPy (numerical computing)
-- SciPy (scientific computing)
+- SciPy (scientific computing — required for Spline trend method)
 - Matplotlib (plotting)
 
 #### Optional Dependencies
@@ -127,162 +211,161 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
    │   ├── parseEM.py
    │   ├── file_fun.py
    │   └── gui_widgets.py
+   ├── media/
+   │   └── mac.ico
    ├── kmall_to_pkl_converter.py
    ├── swath_coverage_plotter.py
-   └── media/
+   ├── SwathCoveragePlotter.spec
+   └── KMALL_to_PKL_Converter.spec
    ```
 
 ### Building Executables (Optional)
 
-Windows executables can be built using PyInstaller:
+Windows executables can be built using PyInstaller. Both spec files read the version number automatically from the source code.
 
 ```bash
-# Build converter executable
-pyinstaller KMALL_to_PKL_Converter.spec
-
 # Build plotter executable
-pyinstaller SwathCoveragePlotter.spec
+pyinstaller SwathCoveragePlotter.spec --clean
+
+# Build converter executable
+pyinstaller KMALL_to_PKL_Converter.spec --clean
 ```
 
-Or use the provided build scripts:
-```bash
-# Windows Batch
-build_exe.bat
+Output is placed in the `dist/` folder, named with the current version (e.g., `Swath_Coverage_Plotter_v2026.03.exe`).
 
-# Windows PowerShell
-build_exe.ps1
-```
+---
 
 ## Supported File Formats
 
 ### Input Formats
-- **KMALL**: Kongsberg's modern multibeam format (.kmall)
-- **ALL**: Kongsberg's legacy format (.all)
+- **KMALL** (.kmall): Kongsberg's modern multibeam format
+- **ALL** (.all): Kongsberg's legacy format
 
-### Output Formats
-- **PKL**: Optimized pickle format for fast loading (.pkl)
-  - Optional gzip compression (30-70% size reduction)
-  - Contains coordinates, backscatter, metadata, and parameters
+### Output / Intermediate Formats
+- **PKL** (.pkl): Optimized pickle format for fast loading
+  - Optional gzip compression (30–70% size reduction)
+  - Contains coordinates, backscatter, metadata, and acquisition parameters
+
+---
 
 ## Supported Multibeam Systems
 
 The toolkit supports Kongsberg EM series multibeam systems:
-- EM 2040
-- EM 2042
-- EM 302
-- EM 304
-- EM 710
-- EM 712
-- EM 122
-- EM 124
+- EM 2040 / EM 2042
+- EM 302 / EM 304
+- EM 710 / EM 712
+- EM 122 / EM 124
+
+---
 
 ## Plot Types
 
-The Swath Coverage Plotter provides the following plot types:
-
-1. **Depth**: Swath coverage with depth coloring
-2. **Backscatter**: Acoustic backscatter visualization
-3. **Ping Mode**: Depth mode visualization (Very Shallow, Shallow, Medium, Deep, etc.)
+1. **Depth**: Swath coverage scatter plot, colored by depth (shallow = red, deep = blue)
+2. **Backscatter**: Acoustic backscatter amplitude visualization
+3. **Ping Mode**: Depth mode over time (Very Shallow, Shallow, Medium, Deep, etc.)
 4. **Pulse Form**: Continuous Wave (CW) vs. Frequency Modulated (FM) pulse forms
 5. **Swath Mode**: Single vs. Dual swath operation
-6. **Frequency**: Operating frequency visualization
+6. **Frequency**: Operating frequency over time
 7. **Data Rate**: Data acquisition rate over time
 8. **Timing**: Ping interval and timing analysis
 9. **Parameters**: Runtime parameter log and search
 
-## Data Processing Features
+---
 
-### Filtering Options
-- **Angle Filtering**: Filter by nominal swath angles
-- **Depth Filtering**: Filter by depth ranges (separate for new/archive data)
-- **Backscatter Filtering**: Filter by backscatter amplitude
-- **Ping Interval Filtering**: Filter by time between pings
-- **Runtime Parameter Filtering**: Hide angles/coverage near runtime limits
+## Coverage Trend Analysis
 
-### Analysis Features
-- **Coverage Trend Calculation**: Calculate and visualize coverage trends
-- **Parameter Search**: Search acquisition parameters by multiple criteria
-- **Theoretical Performance**: Overlay theoretical coverage specification curves
-- **Data Archiving**: Archive processed data for later comparison
-- **Export to Gap Filler**: Export coverage trends for Gap Filler import
+The **Trend** tab provides a full workflow for determining and exporting the swath coverage trend:
+
+1. **Calculate**: Choose a source (Swath or Archive), a calculation method, the number of depth bands (steps), and a minimum point count per band, then click "Calculate Coverage Trend".
+2. **Digitize**: Click "Digitize Trend" and click directly on the depth plot to manually add depth/width points. New points are merged with existing ones, sorted by depth.
+3. **Edit**: Use "Edit Depth Band Width" to drag trend points interactively. Negative widths are prevented; the original position is shown in blue and the dragged position in red.
+4. **Review**: The trend table shows Depth (m), Width (m), and # Points for each band. Cells in the Width column are editable; the # Points column is read-only.
+5. **Export**: With "Show Coverage Trend" enabled, click "Export Gap Filler" to export the trend as a Gap Filler import text file.
+
+### Calculation Methods
+| Method | Description |
+|---|---|
+| Mean | Mean of absolute swath width per depth band |
+| Mean+σ | Mean + one standard deviation (~84th percentile for Gaussian data) |
+| Mean+2σ | Mean + two standard deviations (~97.7th percentile) |
+| Spline | Cubic smoothing spline anchored through the origin |
+
+---
 
 ## Performance Tips
 
 ### For Large Datasets
-- **Use PKL Files**: Convert raw files to PKL format first for faster loading
-- **Enable Compression**: Reduces file sizes by 30-70% with minimal performance impact
-- **Use Point Count Limits**: Limit plotted points for faster rendering
-- **Apply Filters**: Use filters to reduce data before plotting
+- **Use PKL Files**: Convert raw files to PKL format first for significantly faster loading
+- **Enable Compression**: Reduces file sizes by 30–70% with minimal performance impact
+- **Limit Point Count**: Use the Filter tab "Limit plotted point count" option for faster rendering
+- **Apply Filters**: Reduce data before plotting using depth, angle, or width filters
 
 ### For Batch Processing
-- Convert multiple files to PKL format using the converter
+- Convert multiple files to PKL format using the KMALL to PKL Converter or the "Convert to Swath PKL" button in the plotter
 - Load PKL files directly in the plotter for faster processing
-- Use archive functionality to compare different datasets
+- Use the Archive functionality to compare different datasets
+
+---
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Import Errors**
+1. **No data plotted after loading a .all file**
+   - Ensure the `libs/parseEM.py` module is present in the `libs/` folder — it provides the `.all` datagram parsers
+
+2. **Import Errors**
    ```
    Error: Could not import libraries from libs folder
    ```
-   **Solution**: Ensure the `libs/` folder is present in the same directory as the scripts
+   Ensure the `libs/` folder is present in the same directory as the scripts
 
-2. **PyQt6 Not Found**
+3. **PyQt6 Not Found**
    ```
    Error: PyQt6 is not installed
    ```
-   **Solution**: Install PyQt6: `pip install PyQt6`
+   Install PyQt6: `pip install PyQt6`
 
-3. **Memory Errors with Large Files**
-   ```
-   Out of memory error
-   ```
-   **Solution**: 
-   - Use PKL files instead of raw files
-   - Enable compression
-   - Use point count limits
+4. **Memory Errors with Large Files**
+   - Convert raw files to PKL format first
+   - Enable "Limit plotted point count" in the Filter tab
    - Process files individually
 
-4. **File Permission Errors**
-   ```
-   Permission denied when writing to output directory
-   ```
-   **Solution**: Choose a different output directory or run as administrator
+5. **File Permission Errors when writing PKL files**
+   - Choose a different output directory or run as administrator
 
 ### Getting Help
 
-If you encounter issues:
-1. Check the log area in the application for detailed error messages
+1. Check the **Activity Log** in the left panel for detailed error messages
 2. Ensure all dependencies are installed correctly
 3. Verify the directory structure is correct
 4. Try processing a single small file first
 
+---
+
 ## Version History
 
 ### Swath Coverage Plotter
-- **v2026.01**: Dark theme (Fusion + dark palette), Export Plots groupbox moved to left panel, Archive PKL Add Directory and Include Subdirectories, Show Path for archive list, layout and naming updates
-- **v2025.12**: Fixed layout for Swath PKL and Archive PKL management; Export Plots groupbox; relabel "Include Subdirectories"
+- **v2026.03**: Fixed .all file loading (corrected `parseEM` import in `readALLswath`); fixed `last_depth_clim` crash on first plot with no valid data; fixed empty array crash in `plot_coverage`
+- **v2026.02**: Coverage trend tab overhaul — Method pulldown (Mean, Mean+σ, Mean+2σ, Spline), # of Steps pulldown, Min Points parameter, # Points column in trend table, Digitize Trend button, Edit Depth Band Width drag editing, Clear All Points button, mirrored Show Coverage Trend checkbox, Width (Swath/Archive) filter, cursor shows filename only, Converting to PKL progress bar below Activity Log
+- **v2026.01**: Dark theme (Fusion + dark palette), Export Plots groupbox moved to left panel, Archive PKL Add Directory and Include Subdirectories, Show Path for all file lists, layout and naming updates
+- **v2025.12**: Fixed layout for Swath PKL and Archive PKL management; Export Plots groupbox; relabeled "Include Subdirectories"
 - **v2025.11**: Fixed plot decimation to only run when filter settings are changed
 - **v2025.10**: Reorganized sources area into tabs
-- **v2025.09**: GUI improvements, Fixed Plots Scaling
+- **v2025.09**: GUI improvements, fixed plot scaling
 - **v2025.08**: Enhanced theoretical performance plotting
 - **v2025.07**: Improved swath coverage curve specification plotting
 - **v2025.06**: Fixed issue with loading new PKL files, added loading directory
 - **v2025.05**: Fixed frequency plot export size and text field styling
-- **v2025.03**: Fixed some issues with the swath coverage plotter
-- **v2025.02**: New features, new swath PKL, GUI redesign
+- **v2025.03**: Fixed various issues with the swath coverage plotter
+- **v2025.02**: New features, new swath PKL format, GUI redesign
 
 ### KMALL to PKL Converter
 - **v2026.01**: Dark theme (Fusion + dark palette); executable naming `KMALL_to_SwathPKL_Converter_v` + version
-- **v2025.02**: Added subdirectory search option; checkbox to include subdirectories when adding a directory
-- **v2025.01**: Initial release
-  - GUI interface
-  - Batch processing
-  - Compression support
-  - Progress tracking
-  - Error handling
+- **v2025.02**: Added subdirectory search option
+- **v2025.01**: Initial release — GUI interface, batch processing, compression support, progress tracking, error handling
+
+---
 
 ## Contributing
 
@@ -314,11 +397,6 @@ https://github.com/seamapper/SwathCoverage
 
 ## Contact
 
-For questions, issues, or contributions:
 - **Email**: kjerram@ccom.unh.edu, pjohnson@ccom.unh.edu
 - **Repository**: https://github.com/seamapper/SwathCoverage
 - **Issues**: https://github.com/seamapper/SwathCoverage/issues
-
-
-
-

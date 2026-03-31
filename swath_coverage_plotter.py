@@ -39,7 +39,8 @@ Key Features:
 # __version__ = "2025.11"  # Fixed plot decimation to only run when filter settings are changed
 # __version__ = "2025.12"  # Fixed layout for swath pkl and archive pkl management
 # __version__ = "2026.01"  # Added dark theme and updated layout for swath pkl and archive pkl management
-__version__ = "2026.02"  # Added coverage trend calculation and editing capabilities
+# __version__ = "2026.02"  # Added coverage trend calculation and editing capabilities
+__version__ = "2026.03"  # Fixed .all file loading and removed 'Unsupported format' error
 
 # BSD-3-Clause License
 #
@@ -93,6 +94,12 @@ try:
     from .libs.swath_coverage_lib import *
 except ImportError:
     from libs.swath_coverage_lib import *
+
+# Explicit import for static type checkers / IDEs
+try:
+    from .libs.swath_coverage_lib import replot_coverage_trend_from_arrays
+except ImportError:
+    from libs.swath_coverage_lib import replot_coverage_trend_from_arrays
 import matplotlib.pyplot as plt
 
 
@@ -930,10 +937,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.calc_pb.setMaximum(100)  # this will update with number of files
         self.calc_pb.setValue(0)
         calc_pb_layout = BoxLayout([calc_pb_lbl, self.calc_pb], 'h')
-        
-        # Combine status information and progress bar
+
+        # Progress bar for KMALL/PKL conversion
+        self.convert_pb_lbl = Label('Converting to PKL:')
+        self.convert_pb = QtWidgets.QProgressBar()
+        self.convert_pb.setGeometry(0, 0, 150, 30)
+        self.convert_pb.setMaximum(100)
+        self.convert_pb.setValue(0)
+        self.convert_pb.setFormat("File %v of %m")
+        self.convert_pb.setTextVisible(True)
+        convert_pb_layout = BoxLayout([self.convert_pb_lbl, self.convert_pb], 'h')
+        self.convert_pb_lbl.setVisible(False)
+        self.convert_pb.setVisible(False)
+
+        # Combine status information and progress bars
         self.prog_layout = BoxLayout([self.current_file_lbl, self.sounding_file_lbl], 'v')
         self.prog_layout.addLayout(calc_pb_layout)
+        self.prog_layout.addLayout(convert_pb_layout)
 
         # Set the left panel layout with file controls on top, export trend, log, and progress on bottom
         # Sources area gets 75% of space, export trend and activity log get 25%
@@ -2014,6 +2034,60 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # set up tab 4: coverage trend table (Depth/Width per bin)
         self.trend_tab = QtWidgets.QWidget()
+        # Mirror the Plot tab "Show Coverage Trend" checkbox at the top of the Trend tab.
+        # Off by default, and synchronized both directions.
+        self.show_coverage_trend_chk_trendtab = CheckBox(
+            'Show Coverage Trend', False, 'show_cov_trend_chk_trendtab',
+            'When checked, display the coverage trend points on the depth plot.'
+        )
+        self._sync_show_cov_trend_chk = False
+        def _set_plot_show_trend(checked):
+            if getattr(self, '_sync_show_cov_trend_chk', False):
+                return
+            try:
+                self._sync_show_cov_trend_chk = True
+                if hasattr(self, 'show_coverage_trend_chk'):
+                    self.show_coverage_trend_chk.setChecked(checked)
+            finally:
+                self._sync_show_cov_trend_chk = False
+
+        def _set_trendtab_show_trend(checked):
+            if not hasattr(self, 'show_coverage_trend_chk_trendtab'):
+                return
+            if self.show_coverage_trend_chk_trendtab.isChecked() == checked:
+                return
+            # prevent recursion
+            self.show_coverage_trend_chk_trendtab.blockSignals(True)
+            self.show_coverage_trend_chk_trendtab.setChecked(checked)
+            self.show_coverage_trend_chk_trendtab.blockSignals(False)
+
+        # Trend-tab checkbox drives Plot-tab checkbox (which also controls plotting behavior)
+        self.show_coverage_trend_chk_trendtab.toggled.connect(_set_plot_show_trend)
+        # Plot-tab checkbox mirrors back to Trend-tab checkbox
+        if hasattr(self, 'show_coverage_trend_chk'):
+            self.show_coverage_trend_chk.toggled.connect(_set_trendtab_show_trend)
+            # initialize to current plot-tab state
+            self.show_coverage_trend_chk_trendtab.setChecked(self.show_coverage_trend_chk.isChecked())
+
+        # Digitize trend button: lets user click port/stbd points on the plot
+        self.digitize_trend_btn = PushButton(
+            'Digitize Trend', 180, 20, 'digitize_trend_btn',
+            'Click to start digitizing trend points from the depth plot. Click again to stop.'
+        )
+        self.digitize_trend_btn.clicked.connect(self._handle_digitize_trend_clicked)
+        # Internal state for digitizing interaction
+        self._trend_digitizing = False
+        self._trend_digitize_points = []
+        self._trend_digitize_cid = None
+        self._trend_digitize_artists = []
+
+        # Clear all trend points (table + arrays) for the selected source
+        self.clear_trend_points_btn = PushButton(
+            'Clear All Points', 180, 20, 'clear_trend_points_btn',
+            'Clear all (depth,width) points from the Trend table'
+        )
+        self.clear_trend_points_btn.clicked.connect(self._handle_clear_all_trend_points)
+
         # GroupBox for calculation controls at top of Trend tab
         self.trend_source_cbox = ComboBox(['Swath', 'Archive'], 100, 20, 'trend_source_cbox',
                                           'Select the source dataset for coverage trend calculation')
@@ -2028,7 +2102,21 @@ class MainWindow(QtWidgets.QMainWindow):
                                alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         trend_steps_layout = BoxLayout([trend_steps_lbl, self.trend_steps_cbox], 'h')
 
-        self.trend_method_cbox = ComboBox(['Mean', 'Mean + StdDev', 'Mean + (2 * StdDev)', 'Spline'], 160, 20, 'trend_method_cbox',
+        trend_min_points_lbl = Label('Min Points:', width=70,
+                                       alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        self.trend_min_points_tb = LineEdit('10', 60, 20, 'trend_min_points_tb',
+                                            'Minimum number of points required per depth band for trend width (otherwise width=0)')
+        # Integer-ish validator (0 decimal places)
+        self.trend_min_points_tb.setValidator(QDoubleValidator(1, np.inf, 0))
+        # Force left alignment so it lines up with the other rows in the Calculate groupbox
+        trend_min_points_layout = BoxLayout(
+            [trend_min_points_lbl, self.trend_min_points_tb],
+            'h',
+            False,
+            (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        )
+
+        self.trend_method_cbox = ComboBox(['Mean', 'Mean+σ', 'Mean+2σ', 'Spline'], 160, 20, 'trend_method_cbox',
                                           'Method used to compute width per depth band from absolute coverage |y|')
         self.trend_method_cbox.setCurrentText('Mean')
         trend_method_lbl = Label('Method:', width=50,
@@ -2040,7 +2128,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.calc_trend_btn.clicked.connect(self._handle_calc_trend_clicked)
         calc_btn_layout = BoxLayout([self.calc_trend_btn], 'h')
 
-        calc_group_layout = BoxLayout([calc_btn_layout, trend_source_layout, trend_method_layout, trend_steps_layout], 'v')
+        calc_group_layout = BoxLayout(
+            [calc_btn_layout, trend_source_layout, trend_method_layout, trend_steps_layout, trend_min_points_layout],
+            'v',
+            False,
+            (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        )
         calc_groupbox = GroupBox('Calculate', calc_group_layout, False, False, 'trend_calc_gb')
 
         self.edit_width_btn = PushButton('Edit Depth Band Width', 180, 20, 'edit_width_btn',
@@ -2049,18 +2142,34 @@ class MainWindow(QtWidgets.QMainWindow):
         edit_width_layout = BoxLayout([self.edit_width_btn], 'h')
         edit_width_gb = GroupBox('Edit Width', edit_width_layout, False, False, 'edit_width_gb')
 
-        self.trend_table = QtWidgets.QTableWidget(0, 2, self.trend_tab)
-        self.trend_table.setHorizontalHeaderLabels(['Depth (m)', 'Width (m)'])
-        self.trend_table.horizontalHeader().setStretchLastSection(True)
+        # Columns: Depth, Width, # Points (informational, not editable)
+        self.trend_table = QtWidgets.QTableWidget(0, 3, self.trend_tab)
+        self.trend_table.setHorizontalHeaderLabels(['Depth (m)', 'Width (m)', '# Points'])
+        # Make columns compact so all 3 fit in the Trend tab width
+        header = self.trend_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        try:
+            header.setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Fixed)
+        except Exception:
+            pass
+        # Depth/Width are the important columns; # Points is narrow info-only
+        header.resizeSection(0, 70)
+        header.resizeSection(1, 70)
+        header.resizeSection(2, 60)
         self.trend_table.verticalHeader().setVisible(False)
         self.trend_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.AllEditTriggers)
         self.trend_table.setShowGrid(True)
         # Explicit grid color so lines are visible (medium gray)
         self.trend_table.setStyleSheet('QTableWidget { gridline-color: #888888; }')
         trend_tab_layout = QtWidgets.QVBoxLayout()
+        # Put the mirrored checkbox at the top of the Trend tab
+        trend_tab_layout.addWidget(self.show_coverage_trend_chk_trendtab, 0)
         trend_tab_layout.addWidget(calc_groupbox, 0)
+        trend_tab_layout.addWidget(self.digitize_trend_btn, 0)
         trend_tab_layout.addWidget(edit_width_gb, 0)
         trend_tab_layout.addWidget(self.trend_table, 1)
+        # Clear button just above export
+        trend_tab_layout.addWidget(self.clear_trend_points_btn, 0)
         # Attach Export Trend groupbox at the bottom of the Trend tab
         trend_tab_layout.addWidget(self.export_trend_gb, 0)
         self.trend_tab.setLayout(trend_tab_layout)
@@ -2070,6 +2179,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.trend_steps_cbox.currentTextChanged.connect(lambda: refresh_plot(self))
         # When Method changes, refresh plot so trend is recalculated and redrawn
         self.trend_method_cbox.currentTextChanged.connect(lambda: refresh_plot(self))
+        # When Min Points changes, refresh plot so trend is recalculated and redrawn
+        self.trend_min_points_tb.returnPressed.connect(lambda: refresh_plot(self))
+        self.trend_min_points_tb.editingFinished.connect(lambda: refresh_plot(self))
 
         # add tabs to tab layout (Trend before Search)
         self.tabs.addTab(self.tab1, 'Plot')
@@ -2135,6 +2247,174 @@ class MainWindow(QtWidgets.QMainWindow):
             self.trend_artists = []
             if hasattr(self, 'swath_canvas'):
                 self.swath_canvas.draw()
+
+    def _handle_digitize_trend_clicked(self):
+        """Toggle digitizing mode for Trend tab: click port/stbd points on plot to add (depth,width) rows."""
+        if getattr(self, '_trend_digitizing', False):
+            self._stop_digitize_trend()
+        else:
+            self._start_digitize_trend()
+
+    def _handle_clear_all_trend_points(self):
+        """Clear all (depth,width) points in the Trend table for the selected source."""
+        # Stop any active interactions to avoid race conditions
+        if getattr(self, '_trend_digitizing', False):
+            try:
+                self._stop_digitize_trend()
+            except Exception:
+                pass
+        if getattr(self, '_trend_width_edit_mode', False):
+            try:
+                stop_trend_width_edit(self)
+            except Exception:
+                pass
+            self._trend_width_edit_mode = False
+            if hasattr(self, 'edit_width_btn'):
+                self.edit_width_btn.setText('Edit Depth Band Width')
+
+        is_archive = str(self.trend_source_cbox.currentText()) == 'Archive'
+
+        # Clear arrays for the active source
+        if is_archive:
+            self.trend_bin_centers_arc = []
+            self.trend_bin_means_arc = []
+            self.trend_bin_counts_arc = []
+            self.has_trend_arc = False
+        else:
+            self.trend_bin_centers = []
+            self.trend_bin_means = []
+            self.trend_bin_counts = []
+            self.has_trend_new = False
+
+        update_trend_table_from_arrays(self, is_archive)
+        replot_coverage_trend_from_arrays(self, is_archive)
+
+    def _start_digitize_trend(self):
+        if not hasattr(self, 'swath_canvas') or not hasattr(self, 'swath_ax'):
+            return
+        # If width-edit mode is active, stop it to avoid event conflicts
+        if getattr(self, '_trend_width_edit_mode', False):
+            try:
+                stop_trend_width_edit(self)
+            except Exception:
+                pass
+            self._trend_width_edit_mode = False
+            if hasattr(self, 'edit_width_btn'):
+                self.edit_width_btn.setText('Edit Depth Band Width')
+
+        self._trend_digitizing = True
+        self._trend_digitize_points = []
+        # Remove any temporary digitize markers
+        if hasattr(self, '_trend_digitize_artists'):
+            for art in list(self._trend_digitize_artists):
+                try:
+                    art.remove()
+                except Exception:
+                    pass
+        self._trend_digitize_artists = []
+
+        self.digitize_trend_btn.setText('Digitizing.  Click here to stop.')
+
+        # Start listening for plot clicks
+        try:
+            self._trend_digitize_cid = self.swath_canvas.mpl_connect(
+                'button_press_event', self._on_digitize_trend_click
+            )
+        except Exception:
+            self._trend_digitize_cid = None
+
+    def _on_digitize_trend_click(self, event):
+        if not getattr(self, '_trend_digitizing', False):
+            return
+        if getattr(event, 'button', None) not in (1,):  # left mouse button only
+            return
+        if event.inaxes != self.swath_ax:
+            return
+        if event.xdata is None or event.ydata is None:
+            return
+        try:
+            depth = float(event.ydata)
+            width = abs(float(event.xdata))  # width is absolute swath coverage magnitude
+        except Exception:
+            return
+
+        self._trend_digitize_points.append((depth, width))
+
+        # Visual feedback: temporary marker at the clicked location
+        try:
+            art = self.swath_ax.scatter(
+                [event.xdata], [event.ydata],
+                c='yellow', s=35, marker='o', edgecolors='black', linewidths=0.5, zorder=6
+            )
+            self._trend_digitize_artists.append(art)
+            if hasattr(self, 'swath_canvas'):
+                self.swath_canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _stop_digitize_trend(self):
+        if not getattr(self, '_trend_digitizing', False):
+            return
+        self._trend_digitizing = False
+
+        # Disconnect click handler
+        if getattr(self, '_trend_digitize_cid', None) is not None and hasattr(self, 'swath_canvas'):
+            try:
+                self.swath_canvas.mpl_disconnect(self._trend_digitize_cid)
+            except Exception:
+                pass
+        self._trend_digitize_cid = None
+
+        # Remove temporary digitize markers
+        if hasattr(self, '_trend_digitize_artists'):
+            for art in list(self._trend_digitize_artists):
+                try:
+                    art.remove()
+                except Exception:
+                    pass
+        self._trend_digitize_artists = []
+
+        # Merge digitized points with existing trend table rows for the selected source
+        is_archive = str(self.trend_source_cbox.currentText()) == 'Archive' if hasattr(self, 'trend_source_cbox') else False
+        digitized = list(getattr(self, '_trend_digitize_points', []))
+        if not digitized:
+            self.digitize_trend_btn.setText('Digitize Trend')
+            return
+
+        # Existing arrays for the active source
+        if is_archive:
+            z_existing = list(getattr(self, 'trend_bin_centers_arc', []))
+            y_existing = list(getattr(self, 'trend_bin_means_arc', []))
+            counts_existing = list(getattr(self, 'trend_bin_counts_arc', [0] * len(z_existing)))
+        else:
+            z_existing = list(getattr(self, 'trend_bin_centers', []))
+            y_existing = list(getattr(self, 'trend_bin_means', []))
+            counts_existing = list(getattr(self, 'trend_bin_counts', [0] * len(z_existing)))
+
+        # Merge and sort by depth (ascending)
+        z_merge = z_existing + [d for (d, _w) in digitized]
+        y_merge = y_existing + [w for (_d, w) in digitized]
+        counts_merge = counts_existing + [1] * len(digitized)  # each digitized click counts as 1 point
+        merged_triples = sorted(zip(z_merge, y_merge, counts_merge), key=lambda p: p[0])
+        z_sorted = [float(p[0]) for p in merged_triples]
+        y_sorted = [float(p[1]) for p in merged_triples]
+        counts_sorted = [int(p[2]) for p in merged_triples]
+
+        if is_archive:
+            self.trend_bin_centers_arc = z_sorted
+            self.trend_bin_means_arc = y_sorted
+            self.trend_bin_counts_arc = counts_sorted
+        else:
+            self.trend_bin_centers = z_sorted
+            self.trend_bin_means = y_sorted
+            self.trend_bin_counts = counts_sorted
+
+        # Update table and plot
+        update_trend_table_from_arrays(self, is_archive)
+        # Replot trend points (clears old trend artists and redraws based on updated arrays)
+        replot_coverage_trend_from_arrays(self, is_archive)
+
+        self.digitize_trend_btn.setText('Digitize Trend')
 
     def _handle_edit_width_toggled(self):
         """Toggle drag-to-edit mode for trend width on the plot."""

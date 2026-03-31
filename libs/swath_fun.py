@@ -92,7 +92,7 @@ def readALLswath(self, filename, print_updates=False, parse_outermost_only=False
 
 			if dg_ID in [73, 105]:
 				# print(len(data['IP_start'].keys()))
-				data['IP'][len(data['IP'])] = multibeam_tools.libs.parseEM.IP_dg(dg)
+				data['IP'][len(data['IP'])] = parseEM.IP_dg(dg)
 
 				# if dg_ID == 73:
 				# 	update_log(self, 'Found TX Z offset = ' + str(data['IP'][len(data['IP']) - 1]['S1Z']) +
@@ -103,20 +103,20 @@ def readALLswath(self, filename, print_updates=False, parse_outermost_only=False
 				# FUTURE: MODIFY RRA PARSER WITH PARSE_OUTERMOST_ONLY OPTION TO SPEED UP
 				if print_updates:
 					print('parsing RRA datagram')
-				data['RRA'][len(data['RRA'])] = multibeam_tools.libs.parseEM.RRA_78_dg(dg)
+				data['RRA'][len(data['RRA'])] = parseEM.RRA_78_dg(dg)
 
 			# parse POS 80 datagram
 			if dg_ID == 80:
-				data['POS'][len(data['POS'])] = multibeam_tools.libs.parseEM.POS_dg(dg)
+				data['POS'][len(data['POS'])] = parseEM.POS_dg(dg)
 
 			# Parse RUNTIME PARAM datagram PYTHON 3
 			if dg_ID == 82:
-				data['RTP'][len(data['RTP'])] = multibeam_tools.libs.parseEM.RTP_dg(dg)
+				data['RTP'][len(data['RTP'])] = parseEM.RTP_dg(dg)
 
 			# Parse XYZ 88 datagram PYTHON 3
 			if dg_ID == 88 and not skip_xyz:  # skip if not needed to store last param update
 
-				XYZ_temp = multibeam_tools.libs.parseEM.XYZ_dg(dg, parse_outermost_only=parse_outermost_only,
+				XYZ_temp = parseEM.XYZ_dg(dg, parse_outermost_only=parse_outermost_only,
 															   parse_ping_info_only=parse_params_only)
 
 				if XYZ_temp != []:  # store only if valid soundings are found (parser returns empty otherwise)

@@ -1180,8 +1180,11 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
             self.z_max = max([self.z_max, np.nanmax(z_f)])
         # else: leave self.x_max/self.z_max unchanged (e.g. keep 0 from clear_plot if no points pass)
     else:
-        self.x_max = max([self.x_max, np.nanmax(np.abs(np.asarray(y_all)))])
-        self.z_max = max([self.z_max, np.nanmax(np.asarray(z_all))])
+        y_arr = np.asarray(y_all)
+        z_arr = np.asarray(z_all)
+        if y_arr.size and z_arr.size:
+            self.x_max = max([self.x_max, np.nanmax(np.abs(y_arr))])
+            self.z_max = max([self.z_max, np.nanmax(z_arr)])
 
     # get color mode and set up color maps and legend
     cmode = [self.cmode, self.cmode_arc][is_archive]  # get user selected color mode for local use
@@ -1241,13 +1244,13 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
                     if len(c_all) > 0:
                         self.clim = [min(c_all), max(c_all)]
                     else:
-                        self.clim = deepcopy(self.last_depth_clim)
+                        self.clim = deepcopy(getattr(self, 'last_depth_clim', [0, 1000]))
             else:
                 print('DEBUG: Custom Plot text boxes not found, falling back to data range')
                 if len(c_all) > 0:
                     self.clim = [min(c_all), max(c_all)]
                 else:
-                    self.clim = deepcopy(self.last_depth_clim)
+                    self.clim = deepcopy(getattr(self, 'last_depth_clim', [0, 1000]))
         else:
             print(f'DEBUG: Using {self.clim_cbox.currentText()} option for depth color scaling')
             # Use actual data range for color scaling
@@ -1256,7 +1259,7 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
                 self.last_depth_clim = deepcopy(self.clim)
                 print(f'DEBUG: Using data range for color scaling: {self.clim}')
             else:  # use last known depth clim to avoid errors in scatter
-                self.clim = deepcopy(self.last_depth_clim)
+                self.clim = deepcopy(getattr(self, 'last_depth_clim', [0, 1000]))
                 print(f'DEBUG: Using last known depth clim for color scaling: {self.clim}')
             
         # --- Robust fallback: ensure self.clim is always valid ---
@@ -4029,17 +4032,35 @@ def calc_coverage_trend(self, z_all, y_all, is_archive):
             except (ValueError, TypeError):
                 n_steps = 10
         # n_steps depth bands => n_steps+1 bin edges
-        bins = np.linspace(min(z_all), max(z_all), n_steps + 1)
-        dz = np.mean(np.diff(bins))
-        # print('got bins = ', bins, 'with dz = ', dz)
-        # y_all_abs = np.abs(self.y_all)
-        y_all_abs = np.abs(y_all)
+        # Convert to numpy arrays and only use valid points for bin counts/means.
+        # In your detection dictionaries, missing port/stbd soundings are often stored as depth=0.
+        # Those placeholder points can incorrectly inflate shallowest-bin counts, so we exclude depth==0.
+        z_arr = np.asarray(z_all, dtype=float)
+        y_abs_arr = np.abs(np.asarray(y_all, dtype=float))
+        valid_idx = np.isfinite(z_arr) & np.isfinite(y_abs_arr) & (z_arr > 0)
 
-        # print('got y_all_abs =', y_all_abs)
-        # z_all_dig = np.digitize(self.z_all, bins)
-        z_all_dig = np.digitize(z_all, bins)
+        z_valid = z_arr[valid_idx]
+        y_valid = y_abs_arr[valid_idx]
+        if z_valid.size == 0:
+            # No valid points; return an all-zero trend
+            z_min = float(np.nanmin(z_arr)) if np.any(np.isfinite(z_arr)) else 0.0
+            z_max = float(np.nanmax(z_arr)) if np.any(np.isfinite(z_arr)) else 0.0
+            bins = np.linspace(z_min, z_max, n_steps + 1)
+            dz = np.mean(np.diff(bins))
+            z_centers = np.asarray([i + dz / 2 for i in bins[:-1]], dtype=float)
+            # No digitized points because there are no valid points
+            z_valid_dig = np.asarray([], dtype=int)
+            y_valid = np.asarray([], dtype=float)
+        else:
+            bins = np.linspace(float(np.nanmin(z_valid)), float(np.nanmax(z_valid)), n_steps + 1)
+            dz = np.mean(np.diff(bins))
+
+            # Digitize only valid points
+            z_valid_dig = np.digitize(z_valid, bins)
+            z_centers = np.asarray([i + dz / 2 for i in bins[:-1]], dtype=float)
 
         # print('got z_all_dig =', z_all_dig)
+        # Selected method for per-band width
         method = 'Mean'
         if hasattr(self, 'trend_method_cbox'):
             try:
@@ -4047,42 +4068,63 @@ def calc_coverage_trend(self, z_all, y_all, is_archive):
             except Exception:
                 method = 'Mean'
 
-        if method == 'Spline':
-            base_means = [y_all_abs[z_all_dig == i].mean() for i in range(1, len(bins))]
-            base_means = np.asarray([float(m) if np.isfinite(m) else 0.0 for m in base_means], dtype=float)
-            z_centers = np.asarray([i + dz / 2 for i in bins[:-1]], dtype=float)
-            # Fit spline to non-zero bins and force an anchor at (0,0)
-            keep = np.isfinite(z_centers) & np.isfinite(base_means) & (base_means > 0)
+        # Minimum points per depth band for the trend calculation
+        min_points = 10
+        if hasattr(self, 'trend_min_points_tb'):
+            try:
+                # QLineEdit can provide '', so guard parse
+                txt = str(self.trend_min_points_tb.text()).strip()
+                min_points = int(float(txt)) if txt else 10
+            except Exception:
+                min_points = 10
+        min_points = max(1, int(min_points))
+
+        n_bins = len(bins) - 1
+
+        # Compute mean/std only for bins meeting min_points; otherwise width stays 0
+        bin_means = np.zeros(n_bins, dtype=float)
+        bin_stds = np.zeros(n_bins, dtype=float)
+        bin_counts = np.zeros(n_bins, dtype=int)
+
+        for bi in range(n_bins):
+            bin_id = bi + 1  # digitize bins start at 1
+            mask = (z_valid_dig == bin_id)
+            c = int(np.sum(mask))
+            bin_counts[bi] = c
+            if c >= min_points:
+                vals = y_valid[mask]
+                m = float(np.mean(vals)) if len(vals) else 0.0
+                sd = float(np.std(vals)) if len(vals) else 0.0
+                bin_means[bi] = m if np.isfinite(m) else 0.0
+                bin_stds[bi] = sd if np.isfinite(sd) else 0.0
+
+        if method == 'Mean':
+            trend_bin_means = bin_means.tolist()
+        elif method in ('Mean + StdDev', 'Mean+σ'):
+            trend_bin_means = (bin_means + bin_stds).tolist()
+        elif method in ('Mean + (2 * StdDev)', 'Mean+2σ'):
+            trend_bin_means = (bin_means + 2.0 * bin_stds).tolist()
+        elif method == 'Spline':
+            # Fit spline only using bins with enough points; anchor at (0,0)
+            base_means = bin_means
+            keep = (bin_counts >= min_points) & np.isfinite(z_centers) & np.isfinite(base_means) & (base_means > 0)
             if np.sum(keep) >= 4:
                 z_fit = np.concatenate(([0.0], z_centers[keep]))
                 w_fit = np.concatenate(([0.0], base_means[keep]))
-                # Weight the anchor strongly so spline starts at (0,0)
-                wts = np.concatenate(([50.0], np.ones(np.sum(keep), dtype=float)))
-                # Smoothing factor scaled to data variance (avoid oscillations)
+                wts = np.concatenate(([50.0], np.ones(int(np.sum(keep)), dtype=float)))
                 s_val = float(max(1e-6, len(w_fit) * np.nanvar(w_fit) * 0.25))
                 spl = UnivariateSpline(z_fit, w_fit, w=wts, k=3, s=s_val)
-                trend_bin_means = spl(z_centers).astype(float).tolist()
+                w_spline = spl(z_centers).astype(float)
+                # Any bin not meeting min_points should remain 0
+                w_spline[bin_counts < min_points] = 0.0
+                trend_bin_means = np.maximum(0.0, w_spline).tolist()
             else:
-                # Not enough points for spline; fall back to mean
-                trend_bin_means = base_means.tolist()
-        elif method == 'Mean + StdDev':
-            trend_bin_means = [
-                (y_all_abs[z_all_dig == i].mean() + y_all_abs[z_all_dig == i].std())
-                for i in range(1, len(bins))
-            ]
-        elif method == 'Mean + (2 * StdDev)':
-            trend_bin_means = [
-                (y_all_abs[z_all_dig == i].mean() + 2.0 * y_all_abs[z_all_dig == i].std())
-                for i in range(1, len(bins))
-            ]
-        else:  # 'Mean'
-            trend_bin_means = [y_all_abs[z_all_dig == i].mean() for i in range(1, len(bins))]
+                trend_bin_means = bin_means.tolist()
+        else:
+            trend_bin_means = bin_means.tolist()
 
-        # Replace NaN (empty bins) with 0 so table and plot show all depth bands
-        trend_bin_means = [max(0.0, float(m)) if np.isfinite(m) else 0.0 for m in trend_bin_means]
-        # bin_medians = [np.median(y_all_abs[z_all_dig == i]) for i in range(1, len(bins))]
-        # print('got bin_means = ', trend_bin_means)
-        trend_bin_centers = [i + dz/2 for i in bins[:-1]]
+        # bin centers used for plotting
+        trend_bin_centers = z_centers.tolist()
 
         if self.show_coverage_trend_chk.isChecked():
             # Only draw trend for the source selected in Trend tab (so we get one set of 20 points, not one per dataset)
@@ -4096,7 +4138,17 @@ def calc_coverage_trend(self, z_all, y_all, is_archive):
                 c_trend = ['black', 'gray'][is_archive]
                 trend_bin_means_plot = trend_bin_means + ([-1*i for i in trend_bin_means])
                 trend_bin_centers_plot = 2*trend_bin_centers
-                if not hasattr(self, 'trend_artists'):
+                # If calc_coverage_trend is triggered directly (e.g. button press),
+                # we may not have cleared the axes; ensure we don't accumulate multiple
+                # trend scatters/lines.
+                if hasattr(self, 'trend_artists'):
+                    for art in list(self.trend_artists):
+                        try:
+                            art.remove()
+                        except Exception:
+                            pass
+                    self.trend_artists = []
+                else:
                     self.trend_artists = []
                 h = self.swath_ax.scatter(trend_bin_means_plot, trend_bin_centers_plot,
                                           marker='o', s=10, c=c_trend)
@@ -4107,7 +4159,8 @@ def calc_coverage_trend(self, z_all, y_all, is_archive):
                     if hasattr(self, 'trend_method_cbox') and str(self.trend_method_cbox.currentText()) == 'Spline':
                         zc = np.asarray(trend_bin_centers, dtype=float)
                         wc = np.asarray(trend_bin_means, dtype=float)
-                        keep = np.isfinite(zc) & np.isfinite(wc) & (wc >= 0)
+                        # Only fit/draw using bins that met the minimum-point requirement
+                        keep = (bin_counts >= min_points) & np.isfinite(zc) & np.isfinite(wc) & (wc > 0)
                         if np.sum(keep) >= 4:
                             z_fit = np.concatenate(([0.0], zc[keep]))
                             w_fit = np.concatenate(([0.0], wc[keep]))
@@ -4129,10 +4182,12 @@ def calc_coverage_trend(self, z_all, y_all, is_archive):
         if is_archive:
             self.trend_bin_centers_arc = trend_bin_centers
             self.trend_bin_means_arc = trend_bin_means
+            self.trend_bin_counts_arc = bin_counts.tolist() if 'bin_counts' in locals() else [0] * len(trend_bin_centers)
 
         else:
             self.trend_bin_centers = trend_bin_centers
             self.trend_bin_means = trend_bin_means
+            self.trend_bin_counts = bin_counts.tolist() if 'bin_counts' in locals() else [0] * len(trend_bin_centers)
 
         # Update Trend tab table, if present
         try:
@@ -4182,17 +4237,91 @@ def update_trend_table_from_arrays(self, is_archive=False):
         return
     z = [self.trend_bin_centers, self.trend_bin_centers_arc][is_archive]
     y = [self.trend_bin_means, self.trend_bin_means_arc][is_archive]
+    # Optional informational count per depth band
+    counts = None
+    if is_archive:
+        counts = getattr(self, 'trend_bin_counts_arc', None)
+    else:
+        counts = getattr(self, 'trend_bin_counts', None)
+    if not counts or len(counts) != len(z):
+        counts = [0] * len(z)
     table = self.trend_table
     table.blockSignals(True)
     table.setRowCount(len(z))
     for i, (depth, width) in enumerate(zip(z, y)):
         depth_item = QtWidgets.QTableWidgetItem(f"{depth:.2f}")
         width_item = QtWidgets.QTableWidgetItem(f"{width:.2f}")
+        count_item = QtWidgets.QTableWidgetItem(str(int(counts[i])))
         depth_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
         width_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        count_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        # Make # Points column non-editable
+        count_flags = count_item.flags()
+        count_item.setFlags(count_flags & ~QtCore.Qt.ItemFlag.ItemIsEditable)
         table.setItem(i, 0, depth_item)
         table.setItem(i, 1, width_item)
+        table.setItem(i, 2, count_item)
     table.blockSignals(False)
+
+
+def replot_coverage_trend_from_arrays(self, is_archive=False):
+    """Redraw the coverage trend scatter (and spline curve, if selected) from current trend arrays."""
+    # Remove any existing trend artists so we don't accumulate points
+    if hasattr(self, 'trend_artists'):
+        for art in list(self.trend_artists):
+            try:
+                art.remove()
+            except Exception:
+                pass
+        self.trend_artists = []
+    else:
+        self.trend_artists = []
+
+    # Only draw if the UI checkbox is enabled
+    if not (hasattr(self, 'show_coverage_trend_chk') and self.show_coverage_trend_chk.isChecked()):
+        if hasattr(self, 'swath_canvas'):
+            self.swath_canvas.draw_idle()
+        return
+
+    z = [self.trend_bin_centers, self.trend_bin_centers_arc][is_archive]
+    y = [self.trend_bin_means, self.trend_bin_means_arc][is_archive]
+    if not z or not y or len(z) != len(y):
+        if hasattr(self, 'swath_canvas'):
+            self.swath_canvas.draw_idle()
+        return
+
+    c_trend = ['black', 'gray'][is_archive]
+    trend_bin_means_plot = y + ([-1 * i for i in y])
+    trend_bin_centers_plot = 2 * np.asarray(z, dtype=float)
+
+    h = self.swath_ax.scatter(trend_bin_means_plot, trend_bin_centers_plot,
+                              marker='o', s=10, c=c_trend)
+    self.h_trend = h
+    self.trend_artists.append(h)
+
+    # If spline method is selected, draw a smooth curve as well
+    try:
+        method = str(self.trend_method_cbox.currentText()) if hasattr(self, 'trend_method_cbox') else 'Mean'
+        if method == 'Spline':
+            zc = np.asarray(z, dtype=float)
+            wc = np.asarray(y, dtype=float)
+            keep = np.isfinite(zc) & np.isfinite(wc) & (wc > 0)
+            if np.sum(keep) >= 4:
+                z_fit = np.concatenate(([0.0], zc[keep]))
+                w_fit = np.concatenate(([0.0], wc[keep]))
+                wts = np.concatenate(([50.0], np.ones(int(np.sum(keep)), dtype=float)))
+                s_val = float(max(1e-6, len(w_fit) * np.nanvar(w_fit) * 0.25))
+                spl = UnivariateSpline(z_fit, w_fit, w=wts, k=3, s=s_val)
+                z_line = np.linspace(0.0, float(np.nanmax(zc[keep])), 200)
+                w_line = np.maximum(0.0, spl(z_line))
+                line1, = self.swath_ax.plot(w_line, z_line, color=c_trend, linewidth=1.0)
+                line2, = self.swath_ax.plot(-w_line, z_line, color=c_trend, linewidth=1.0)
+                self.trend_artists.extend([line1, line2])
+    except Exception:
+        pass
+
+    if hasattr(self, 'swath_canvas'):
+        self.swath_canvas.draw_idle()
 
 
 def _trend_edit_get_source_arrays(self):
@@ -4346,6 +4475,9 @@ def stop_trend_width_edit(self):
 def trend_table_cell_changed(self, row, column):
     """Handle edits in the Trend tab table and update the trend plot and export data."""
     try:
+        # Informational column only
+        if column == 2:
+            return
         # Use current trend source (Trend tab Source) for which data we're editing
         is_archive = False
         if hasattr(self, 'trend_source_cbox'):
@@ -6078,7 +6210,15 @@ def convert_files_to_pickle(self):
     progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
     progress_dialog.setAutoClose(False)
     progress_dialog.setAutoReset(False)
-    
+
+    # Show the embedded progress bar in the left panel
+    if hasattr(self, 'convert_pb'):
+        self.convert_pb.setMaximum(len(source_files))
+        self.convert_pb.setValue(0)
+        self.convert_pb.setVisible(True)
+    if hasattr(self, 'convert_pb_lbl'):
+        self.convert_pb_lbl.setVisible(True)
+
     converted_count = 0
     skipped_count = 0
     failed_count = 0
@@ -6088,7 +6228,11 @@ def convert_files_to_pickle(self):
         for i, source_file in enumerate(source_files):
             progress_dialog.setValue(i)
             progress_dialog.setLabelText(f"Converting: {os.path.basename(source_file)}")
-            
+
+            # Update the embedded progress bar
+            if hasattr(self, 'convert_pb'):
+                self.convert_pb.setValue(i)
+
             if progress_dialog.wasCanceled():
                 break
             
@@ -6377,7 +6521,15 @@ def convert_files_to_pickle(self):
                     update_log(self, f"*** ERROR: Failed to convert {os.path.basename(source_file)}: {str(e)} ***")
         
         progress_dialog.setValue(len(source_files))
-        
+
+        # Update embedded progress bar to full and then hide it
+        if hasattr(self, 'convert_pb'):
+            self.convert_pb.setValue(len(source_files))
+            QtWidgets.QApplication.processEvents()
+            self.convert_pb.setVisible(False)
+        if hasattr(self, 'convert_pb_lbl'):
+            self.convert_pb_lbl.setVisible(False)
+
         # Show completion summary
         summary = f"Conversion complete!\n\n"
         summary += f"Converted: {converted_count} files\n"
@@ -6492,6 +6644,10 @@ def convert_files_to_pickle(self):
     
     finally:
         progress_dialog.close()
+        if hasattr(self, 'convert_pb'):
+            self.convert_pb.setVisible(False)
+        if hasattr(self, 'convert_pb_lbl'):
+            self.convert_pb_lbl.setVisible(False)
 
 
 def _load_pickle_files_as_swath(self, pickle_files):
