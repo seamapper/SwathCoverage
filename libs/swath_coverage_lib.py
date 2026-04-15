@@ -604,22 +604,15 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
             # If any UI element is missing, skip silently
             pass
 
-        # If width filter is enabled, sync custom Swath Width (x-limit) to Max Width once.
+        # If width filter is enabled, always sync custom Swath Width (x-limit) to Max Width.
         try:
             width_gb = getattr(self, 'width_gb', None)
-            if width_gb is not None:
-                if not width_gb.isChecked() and hasattr(self, '_width_limits_synced'):
-                    self._width_limits_synced = False
-                if width_gb.isChecked() and getattr(self, 'plot_lim_gb', None):
-                    if not hasattr(self, '_width_limits_synced'):
-                        self._width_limits_synced = False
-                    if not self._width_limits_synced:
-                        if not self.plot_lim_gb.isChecked():
-                            self.plot_lim_gb.setChecked(True)
-                        # Copy Max Width (swath) into custom swath width limit
-                        if hasattr(self, 'max_width_tb') and hasattr(self, 'max_x_tb'):
-                            self.max_x_tb.setText(self.max_width_tb.text())
-                        self._width_limits_synced = True
+            if width_gb is not None and width_gb.isChecked():
+                if getattr(self, 'plot_lim_gb', None):
+                    if not self.plot_lim_gb.isChecked():
+                        self.plot_lim_gb.setChecked(True)
+                if hasattr(self, 'max_width_tb') and hasattr(self, 'max_x_tb'):
+                    self.max_x_tb.setText(self.max_width_tb.text())
         except Exception:
             pass
 

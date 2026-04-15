@@ -26,21 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-# __version__ = "0.2.4"  # added EM2042 support, using old version of kmall.py from Seabream
-#__version__ = "999999"  # EM2042 example from Tony + transition to POLLACK / Python 3.10
-# __version__ = "2025.02"  # New features, new swath PKL, GUI redesign
-# __version__ = "2025.03"  # Fixed some issues with the swath coverage plotter
-# __version__ = "2025.05"  # Fixed frequency plot export size and text field styling
-# __version__ = "2025.06"  # Fixed issue with loading new PKL files, added loading directory
-# __version__ = "2025.07"  # Improved swatch coverage curve specification plotting 
-# __version__ = "2025.08"  # Enhanced theoretical performance plotting 
-# __version__ = "2025.09"  # GUI improvements, Fixed Plots Scaling
-# __version__ = "2025.10"  # Reorganized sources area into tabs   
-# __version__ = "2025.11"  # Fixed plot decimation to only run when filter settings are changed
-# __version__ = "2025.12"  # Fixed layout for swath pkl and archive pkl management
-# __version__ = "2026.01"  # Added dark theme and updated layout for swath pkl and archive pkl management
-# __version__ = "2026.02"  # Added coverage trend calculation and editing capabilities
-__version__ = "2026.03"  # Fixed .all file loading and removed 'Unsupported format' error
+__version__ = "2026.04" 
 
 # BSD-3-Clause License
 #
