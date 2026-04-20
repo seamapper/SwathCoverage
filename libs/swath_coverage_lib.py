@@ -340,6 +340,15 @@ def init_swath_ax(self):  # set initial swath parameters
         self.z_max_custom = 4000.0  # Default to 4000
         if hasattr(self, 'max_z_tb'):
             self.max_z_tb.setText('4000')
+    # Initialize custom min depth so refresh logic does not force fallback to 0.
+    if hasattr(self, 'min_z_tb') and self.min_z_tb.text():
+        try:
+            self.z_min_custom = float(self.min_z_tb.text())
+        except ValueError:
+            self.z_min_custom = 0.0
+            self.min_z_tb.setText('0')
+    else:
+        self.z_min_custom = 0.0
     self.dr_max_custom = self.dr_max
     self.pi_max_custom = self.pi_max
     self.max_x_tb.setText(str(self.x_max))
@@ -616,14 +625,17 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
         except Exception:
             pass
 
-    # If primary data filters are enabled, auto-switch Depth colormap scaling to "Filtered data".
+    # If primary data filters are enabled, auto-switch Depth colormap scaling to
+    # "Filtered data" only when still at the default "All data".
+    # This preserves explicit user selections like "Fixed limits" or "Custom Plot".
     try:
         primary_filters_active = bool(getattr(self, 'angle_gb', None) and self.angle_gb.isChecked()) or \
                                  bool(getattr(self, 'depth_gb', None) and self.depth_gb.isChecked()) or \
                                  bool(getattr(self, 'bs_gb', None) and self.bs_gb.isChecked())
         if primary_filters_active and hasattr(self, 'plot_tabs') and hasattr(self, 'clim_cbox') and self.plot_tabs.currentIndex() == 0:
             idx = self.clim_cbox.findText('Filtered data')
-            if idx != -1 and self.clim_cbox.currentIndex() != idx:
+            all_data_idx = self.clim_cbox.findText('All data')
+            if idx != -1 and all_data_idx != -1 and self.clim_cbox.currentIndex() == all_data_idx:
                 self.clim_cbox.setCurrentIndex(idx)
     except Exception:
         # If UI elements are not available yet, skip this convenience behavior.
@@ -2415,6 +2427,14 @@ def update_axes(self):
 
 
 def update_plot_limits(self):
+    # Keep custom min-depth cache in sync with user edits so it persists across refreshes
+    # even when custom plot limits are temporarily unchecked.
+    if hasattr(self, 'min_z_tb') and self.min_z_tb.text():
+        try:
+            self.z_min_custom = float(self.min_z_tb.text())
+        except ValueError:
+            pass
+
     # When scaling to filtered data, do not retain old full-data custom values.
     try:
         primary_filters_on = (getattr(self, 'angle_gb', None) and self.angle_gb.isChecked()) or \

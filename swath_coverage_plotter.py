@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.04" 
+__version__ = "2026.05" 
 
 # BSD-3-Clause License
 #
