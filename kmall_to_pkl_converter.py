@@ -15,10 +15,7 @@ Features:
 
 Author: Paul Johnson
 """
-# __version__ = "2025.01"  # First Release of the program
-# __version__ = "2025.02"  # Added subdirectory search option
-# __version__ = "2026.01"  # Added dark theme
-__version__ = "2026.02"  # changed progress bar to show "current / total files, created ability to save files in a SwathPKL directory"
+__version__ = "2026.03"  
 
 import sys
 import os
@@ -117,12 +114,15 @@ class ConversionWorker(QThread):
     conversion_complete = pyqtSignal(dict)  # results dictionary
     error_occurred = pyqtSignal(str)  # error message
     
-    def __init__(self, input_files, output_dir, use_compression=True, overwrite_existing=False):
+    def __init__(self, input_files, output_dir, use_compression=True, overwrite_existing=False,
+                 make_archive=False, archive_basename=""):
         super().__init__()
         self.input_files = input_files
         self.output_dir = output_dir
         self.use_compression = use_compression
         self.overwrite_existing = overwrite_existing
+        self.make_archive = make_archive
+        self.archive_basename = archive_basename
         self.cancelled = False
     
     def run(self):
@@ -139,69 +139,78 @@ class ConversionWorker(QThread):
                 'errors': []
             }
             
-            for i, input_file in enumerate(self.input_files):
-                if self.cancelled:
-                    break
-                
-                filename = os.path.basename(input_file)
-                self.progress_updated.emit(i, f"Converting {filename}...")
-                
-                # Start timing for this file
-                start_time = time.time()
-                
-                try:
-                    # Check if output file already exists and is newer
-                    output_file = os.path.join(self.output_dir, 
-                                             filename + '.pkl')
+            if self.make_archive:
+                archive_path = self.convert_to_archive()
+                if archive_path:
+                    results['converted'] = len(self.input_files)
+                    self.progress_updated.emit(len(self.input_files), f"Archive PKL created: {os.path.basename(archive_path)}")
+                else:
+                    results['failed'] = len(self.input_files)
+                    results['errors'].append("Failed to create archive PKL")
+            else:
+                for i, input_file in enumerate(self.input_files):
+                    if self.cancelled:
+                        break
                     
-                    if os.path.exists(output_file) and not self.overwrite_existing:
-                        input_mtime = os.path.getmtime(input_file)
-                        output_mtime = os.path.getmtime(output_file)
-                        if output_mtime > input_mtime:
-                            results['skipped'] += 1
-                            self.progress_updated.emit(i + 1, f"Skipped {filename} (already up-to-date)")
-                            continue
+                    filename = os.path.basename(input_file)
+                    self.progress_updated.emit(i, f"Converting {filename}...")
                     
-                    # Convert the file
-                    success = self.convert_single_file(input_file, output_file)
+                    # Start timing for this file
+                    start_time = time.time()
                     
-                    # Calculate conversion time
-                    end_time = time.time()
-                    conversion_time = end_time - start_time
-                    
-                    if success:
-                        results['converted'] += 1
-                        # Calculate size savings
-                        input_size = os.path.getsize(input_file)
-                        if os.path.exists(output_file):
-                            output_size = os.path.getsize(output_file)
-                            size_saved = input_size - output_size
-                            results['total_size_saved'] += size_saved
-                            self.progress_updated.emit(i + 1, 
-                                                     f"Converted {filename} in {conversion_time:.2f}s "
-                                                     f"({input_size/(1024*1024):.1f}MB → {output_size/(1024*1024):.1f}MB)")
-                        else:
-                            # Output file wasn't created (shouldn't happen if success=True, but handle gracefully)
-                            self.progress_updated.emit(i + 1, 
-                                                     f"Converted {filename} in {conversion_time:.2f}s "
-                                                     f"({input_size/(1024*1024):.1f}MB → output file not found)")
-                    else:
-                        results['failed'] += 1
-                        results['errors'].append(f"Failed to convert {filename}")
-                        self.progress_updated.emit(i + 1, f"Failed to convert {filename} (after {conversion_time:.2f}s)")
+                    try:
+                        # Check if output file already exists and is newer
+                        output_file = os.path.join(self.output_dir, 
+                                                 filename + '.pkl')
                         
-                except Exception as e:
-                    # Calculate time even for failed conversions
-                    end_time = time.time()
-                    conversion_time = end_time - start_time
-                    
-                    results['failed'] += 1
-                    error_msg = f"Error converting {filename} (after {conversion_time:.2f}s): {str(e)}"
-                    results['errors'].append(error_msg)
-                    self.progress_updated.emit(i + 1, error_msg)
-                    print(f"Detailed error for {filename}: {e}")
-                    import traceback
-                    traceback.print_exc()
+                        if os.path.exists(output_file) and not self.overwrite_existing:
+                            input_mtime = os.path.getmtime(input_file)
+                            output_mtime = os.path.getmtime(output_file)
+                            if output_mtime > input_mtime:
+                                results['skipped'] += 1
+                                self.progress_updated.emit(i + 1, f"Skipped {filename} (already up-to-date)")
+                                continue
+                        
+                        # Convert the file
+                        success = self.convert_single_file(input_file, output_file)
+                        
+                        # Calculate conversion time
+                        end_time = time.time()
+                        conversion_time = end_time - start_time
+                        
+                        if success:
+                            results['converted'] += 1
+                            # Calculate size savings
+                            input_size = os.path.getsize(input_file)
+                            if os.path.exists(output_file):
+                                output_size = os.path.getsize(output_file)
+                                size_saved = input_size - output_size
+                                results['total_size_saved'] += size_saved
+                                self.progress_updated.emit(i + 1, 
+                                                         f"Converted {filename} in {conversion_time:.2f}s "
+                                                         f"({input_size/(1024*1024):.1f}MB → {output_size/(1024*1024):.1f}MB)")
+                            else:
+                                # Output file wasn't created (shouldn't happen if success=True, but handle gracefully)
+                                self.progress_updated.emit(i + 1, 
+                                                         f"Converted {filename} in {conversion_time:.2f}s "
+                                                         f"({input_size/(1024*1024):.1f}MB → output file not found)")
+                        else:
+                            results['failed'] += 1
+                            results['errors'].append(f"Failed to convert {filename}")
+                            self.progress_updated.emit(i + 1, f"Failed to convert {filename} (after {conversion_time:.2f}s)")
+                            
+                    except Exception as e:
+                        # Calculate time even for failed conversions
+                        end_time = time.time()
+                        conversion_time = end_time - start_time
+                        
+                        results['failed'] += 1
+                        error_msg = f"Error converting {filename} (after {conversion_time:.2f}s): {str(e)}"
+                        results['errors'].append(error_msg)
+                        self.progress_updated.emit(i + 1, error_msg)
+                        print(f"Detailed error for {filename}: {e}")
+                        import traceback
+                        traceback.print_exc()
             
             # Calculate total conversion time
             total_end_time = time.time()
@@ -212,6 +221,131 @@ class ConversionWorker(QThread):
             
         except Exception as e:
             self.error_occurred.emit(f"Conversion process failed: {str(e)}")
+    
+    def _new_archive_dict(self):
+        """Create an empty archive dictionary with expected detection keys."""
+        det_key_list = ['fname', 'model', 'datetime', 'date', 'time', 'sn',
+                        'y_port', 'y_stbd', 'z_port', 'z_stbd', 'bs_port', 'bs_stbd',
+                        'rx_angle_port', 'rx_angle_stbd',
+                        'ping_mode', 'pulse_form', 'swath_mode', 'frequency',
+                        'max_port_deg', 'max_stbd_deg', 'max_port_m', 'max_stbd_m',
+                        'tx_x_m', 'tx_y_m', 'tx_z_m', 'tx_r_deg', 'tx_p_deg', 'tx_h_deg',
+                        'rx_x_m', 'rx_y_m', 'rx_z_m', 'rx_r_deg', 'rx_p_deg', 'rx_h_deg',
+                        'aps_num', 'aps_x_m', 'aps_y_m', 'aps_z_m', 'wl_z_m',
+                        'bytes', 'fsize', 'fsize_wc']
+        return {k: [] for k in det_key_list}
+    
+    def _merge_processed_into_archive(self, archive_data, processed_data, input_file):
+        """Merge one processed file's detections into archive structure."""
+        ping_count = len(processed_data.get('y_port', []))
+        if ping_count == 0:
+            return False
+        
+        for key in archive_data.keys():
+            value = processed_data.get(key)
+            
+            if key == 'fname':
+                if isinstance(value, list) and len(value) == ping_count:
+                    archive_data[key].extend(value)
+                else:
+                    archive_data[key].extend([os.path.basename(input_file)] * ping_count)
+                continue
+            
+            if key in ('fsize', 'fsize_wc'):
+                if isinstance(value, list):
+                    archive_data[key].extend(value)
+                else:
+                    file_size = os.path.getsize(input_file)
+                    archive_data[key].extend([file_size] * ping_count)
+                continue
+            
+            if isinstance(value, list):
+                archive_data[key].extend(value)
+            else:
+                default_value = 0 if value is None else value
+                archive_data[key].extend([default_value] * ping_count)
+        
+        return True
+    
+    def _build_archive_det_from_parsed(self, parsed_data):
+        """Build archive-compatible detection dict using the same pipeline as the plotter."""
+        from libs.swath_fun import interpretMode
+        from libs.swath_coverage_lib import sortDetectionsCoverage
+        
+        # Normalize parsed XYZ entries to match sortDetectionsCoverage expectations.
+        # Some KMALL parses omit bytes_from_last_ping; fall back safely.
+        if isinstance(parsed_data, dict) and 'XYZ' in parsed_data:
+            for xyz_entry in parsed_data.get('XYZ', []):
+                if isinstance(xyz_entry, dict) and 'bytes_from_last_ping' not in xyz_entry:
+                    xyz_entry['bytes_from_last_ping'] = xyz_entry.get('BYTES_FROM_LAST_PING', 0)
+        
+        # sortDetectionsCoverage expects an index-keyed data dict
+        parsed_indexed = {0: parsed_data}
+        parsed_with_modes = interpretMode(self, parsed_indexed, print_updates=False)
+        det_single = sortDetectionsCoverage(self, parsed_with_modes, print_updates=False, params_only=False)
+        return det_single
+    
+    def convert_to_archive(self):
+        """Convert all selected files into a single archive PKL."""
+        archive_data = self._new_archive_dict()
+        converted_files = 0
+        total_files = len(self.input_files)
+        
+        safe_basename = f"{self.archive_basename}".strip()
+        if not safe_basename:
+            raise ValueError("Archive basename cannot be empty")
+        
+        archive_file = os.path.join(self.output_dir, f"{safe_basename}.pkl")
+        if os.path.exists(archive_file) and not self.overwrite_existing:
+            raise FileExistsError(f"Archive file already exists: {archive_file}")
+        
+        for i, input_file in enumerate(self.input_files):
+            if self.cancelled:
+                break
+            
+            filename = os.path.basename(input_file)
+            self.progress_updated.emit(i, f"Processing {filename} for archive...")
+            
+            try:
+                if input_file.lower().endswith('.kmall'):
+                    parsed_data = self.parse_kmall_file(input_file)
+                elif input_file.lower().endswith('.all'):
+                    parsed_data = self.parse_all_file(input_file)
+                else:
+                    raise ValueError(f"Unsupported file format: {input_file}")
+                
+                processed_data = self._build_archive_det_from_parsed(parsed_data)
+                if not processed_data or len(processed_data.get('y_port', [])) == 0:
+                    raise RuntimeError("Processed data was empty")
+                
+                if self._merge_processed_into_archive(archive_data, processed_data, input_file):
+                    converted_files += 1
+                    self.progress_updated.emit(i + 1, f"Added {filename} to archive")
+                else:
+                    self.progress_updated.emit(i + 1, f"Skipped {filename} (no valid detections)")
+            
+            except Exception as e:
+                self.progress_updated.emit(i + 1, f"Failed {filename}: {str(e)}")
+        
+        if converted_files == 0:
+            return None
+        
+        archive_data['_archive_metadata'] = {
+            'archive_time': datetime.datetime.now().isoformat(),
+            'version': '2.1',
+            'compressed': self.use_compression,
+            'source_files': total_files,
+            'processed_files': converted_files
+        }
+        
+        if self.use_compression:
+            with gzip.open(archive_file, 'wb', compresslevel=6) as f:
+                pickle.dump(archive_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        else:
+            with open(archive_file, 'wb') as f:
+                pickle.dump(archive_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        
+        return archive_file
     
     def convert_single_file(self, input_file, output_file):
         """Convert a single file from KMALL/ALL to PKL format"""
@@ -463,12 +597,28 @@ class ConversionWorker(QThread):
                                 det['swath_mode'].append(ping_info_data.get('swathMode', 0))
                                 det['frequency'].append(ping_info_data.get('frequencyMode_Hz', 0))
                                 
+                                # Preserve runtime coverage limits so plotter runtime filters do not zero out archive data.
+                                # KMALL ping info can store starboard limits as negative values, so use absolute magnitudes.
+                                max_port_deg = abs(ping_info_data.get('portMeanCov_deg', 90))
+                                max_stbd_deg = abs(ping_info_data.get('stbdMeanCov_deg',
+                                                                        ping_info_data.get('starbMeanCov_deg', 90)))
+                                max_port_m = abs(ping_info_data.get('portMeanCov_m', 100000))
+                                max_stbd_m = abs(ping_info_data.get('stbdMeanCov_m',
+                                                                    ping_info_data.get('starbMeanCov_m', 100000)))
+                                
+                                det['max_port_deg'].append(max_port_deg)
+                                det['max_stbd_deg'].append(max_stbd_deg)
+                                det['max_port_m'].append(max_port_m)
+                                det['max_stbd_m'].append(max_stbd_m)
+                                
                                 # Add other required fields with default values (one entry per ping)
                                 for key in ['model', 'datetime', 'date', 'time', 'sn', 'max_port_deg', 'max_stbd_deg', 
                                           'max_port_m', 'max_stbd_m', 'tx_x_m', 'tx_y_m', 'tx_z_m', 'tx_r_deg', 
                                           'tx_p_deg', 'tx_h_deg', 'rx_x_m', 'rx_y_m', 'rx_z_m', 'rx_r_deg', 
                                           'rx_p_deg', 'rx_h_deg', 'aps_num', 'aps_x_m', 'aps_y_m', 'aps_z_m', 
                                           'wl_z_m', 'bytes']:
+                                    if key in ['max_port_deg', 'max_stbd_deg', 'max_port_m', 'max_stbd_m']:
+                                        continue
                                     det[key].append(0)
                     
                     # Create the optimized data structure exactly like the plotter does
@@ -721,6 +871,16 @@ class KMALLToPKLConverter(QMainWindow):
         options_group = QGroupBox("Conversion Options")
         options_layout = QVBoxLayout(options_group)
         
+        self.make_archive_checkbox = QCheckBox("Make Archive PKL")
+        self.make_archive_checkbox.setChecked(False)
+        self.make_archive_checkbox.setToolTip("Create a single archive PKL from all selected source files")
+        options_layout.addWidget(self.make_archive_checkbox)
+        
+        archive_hint_label = QLabel("When enabled, this replaces normal per-file conversion and creates one archive PKL from all selected files.")
+        archive_hint_label.setWordWrap(True)
+        archive_hint_label.setStyleSheet("color: palette(window-text); font-size: 11px; margin-left: 18px;")
+        options_layout.addWidget(archive_hint_label)
+        
         self.compression_checkbox = QCheckBox("Enable compression (30-70% smaller files)")
         # Load last compression setting
         last_compression = self.session_config.get('last_compression_setting', True)
@@ -967,6 +1127,29 @@ class KMALLToPKLConverter(QMainWindow):
                               "Please select input files and output directory.")
             return
         
+        archive_basename = ""
+        if self.make_archive_checkbox.isChecked():
+            basename, ok = QtWidgets.QInputDialog.getText(
+                self,
+                "Archive Basename",
+                "Enter basename for swath archive file:"
+            )
+            
+            if not ok:
+                self.log_message("Archive conversion cancelled by user")
+                return
+            
+            archive_basename = (basename or "").strip()
+            if not archive_basename:
+                QMessageBox.warning(self, "Missing Basename", "Please enter a valid archive basename.")
+                return
+            
+            invalid_chars = '<>:"/\\|?*'
+            if any(ch in archive_basename for ch in invalid_chars):
+                QMessageBox.warning(self, "Invalid Basename",
+                                    f"Archive basename cannot contain these characters:\n{invalid_chars}")
+                return
+        
         # Disable controls during conversion
         self.convert_btn.setEnabled(False)
         self.select_files_btn.setEnabled(False)
@@ -1000,7 +1183,9 @@ class KMALLToPKLConverter(QMainWindow):
             self.input_files,
             effective_output_dir,
             self.compression_checkbox.isChecked(),
-            self.overwrite_checkbox.isChecked()
+            self.overwrite_checkbox.isChecked(),
+            self.make_archive_checkbox.isChecked(),
+            archive_basename
         )
         
         self.worker.progress_updated.connect(self.update_progress)
@@ -1009,7 +1194,10 @@ class KMALLToPKLConverter(QMainWindow):
         
         self.worker.start()
         
-        self.log_message("Conversion started...")
+        if self.make_archive_checkbox.isChecked():
+            self.log_message(f"Archive conversion started... output base: {archive_basename}")
+        else:
+            self.log_message("Conversion started...")
     
     def cancel_conversion(self):
         """Cancel the conversion process"""
@@ -1115,6 +1303,7 @@ class KMALLToPKLConverter(QMainWindow):
             self.output_dir = ""
             self.input_label.setText("No files selected")
             self.output_label.setText("No output directory selected")
+            self.make_archive_checkbox.setChecked(False)
             self.compression_checkbox.setChecked(True)
             self.include_subdirs_checkbox.setChecked(False)
             self.store_in_swathpkl_checkbox.setChecked(True)

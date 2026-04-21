@@ -234,10 +234,12 @@ def update_button_states(self):
     # Check if there are new data files (.all, .kmall) that haven't been processed yet
     # Only count files that need processing, not archive files (.pkl)
     has_new_data_files = False
+    has_source_files = False
     if len(self.filenames) > 0 and self.filenames[0] != '':
         # Check if there are any .all or .kmall files that need processing
         # Filter out empty strings and check for valid file extensions
         data_files = [f for f in self.filenames if f and f.strip() and f.endswith(('.all', '.kmall'))]
+        has_source_files = len(data_files) > 0
         
         # Check if there are new data files that haven't been processed yet
         # A file is considered "new" if it's not in the processed lists
@@ -251,6 +253,13 @@ def update_button_states(self):
                                if f not in self.fnames_scanned_params and f not in self.fnames_plotted_cov]
             
             has_new_data_files = len(unprocessed_files) > 0
+    
+    # Coverage must be calculated (det populated with sounding arrays) before archiving is allowed.
+    has_coverage_data = (
+        isinstance(self.det, dict) and
+        len(self.det.get('y_port', [])) > 0 and
+        len(self.det.get('z_port', [])) > 0
+    )
     
     # Enable/disable calc coverage and scan params buttons based on file availability
     if hasattr(self, 'calc_coverage_btn'):
@@ -266,6 +275,11 @@ def update_button_states(self):
             
     if hasattr(self, 'scan_params_btn'):
         self.scan_params_btn.setEnabled(has_files)
+    
+    if hasattr(self, 'archive_data_btn'):
+        # Allow archive button when source files are loaded OR coverage already exists.
+        # If coverage does not yet exist, archive_data() will auto-calculate it first.
+        self.archive_data_btn.setEnabled(has_source_files or has_coverage_data)
 
 def _format_coord_3dec(ax_default_format_coord):
     """Return a formatter that shows x,y with 3 decimal places for the toolbar (avoids scientific notation)."""
@@ -692,21 +706,34 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
     except Exception:
         pass
 
-    # update top data plot combobox based on show_data checks
-    if sender in ['show_data_chk', 'show_data_chk_arc', 'calc_coverage_btn', 'load_archive_btn']:
-        last_top_data = self.top_data_cbox.currentText()
-        self.top_data_cbox.clear()
-        show_data_dict = {self.show_data_chk: 'New data', self.show_data_chk_arc: 'Archive data'}
-        self.top_data_cbox.addItems([v for k, v in show_data_dict.items() if k.isChecked()])
-        self.top_data_cbox.setCurrentIndex(max([0, self.top_data_cbox.findText(last_top_data)]))
+    # Always sync top-data selection with current show-data toggles.
+    # Restricting this to specific sender names can miss updates when sender metadata differs,
+    # which leaves top_data_cbox empty and prevents archive plotting from running.
+    last_top_data = self.top_data_cbox.currentText()
+    self.top_data_cbox.clear()
+    show_data_dict = {self.show_data_chk: 'New data', self.show_data_chk_arc: 'Archive data'}
+    enabled_top_data = [v for k, v in show_data_dict.items() if k.isChecked()]
+    self.top_data_cbox.addItems(enabled_top_data)
+    if enabled_top_data:
+        restore_idx = self.top_data_cbox.findText(last_top_data)
+        self.top_data_cbox.setCurrentIndex(max([0, restore_idx]))
 
     # if sending button is returnPressed in min or max clim_tb, update dict of user clim for this mode
     update_clim_tb = sender in ['new_data_color_by_type_radio', 'new_data_single_color_radio', 
                                 'archive_data_color_by_type_radio', 'archive_data_single_color_radio', 'top_data_cbox']
     update_color_modes(self, update_clim_tb)
 
+    # Resolve top-data selection robustly; avoid relying on a potentially empty combobox state.
+    top_data_selection = self.top_data_cbox.currentText().strip() if hasattr(self, 'top_data_cbox') else ''
+    if not top_data_selection:
+        if self.show_data_chk.isChecked():
+            top_data_selection = 'New data'
+        elif self.show_data_chk_arc.isChecked():
+            top_data_selection = 'Archive data'
+
     # update clim_all_data with limits of self.det
-    if self.top_data_cbox.currentText() == 'New data':  # default: plot any archive data first as background
+    if self.show_data_chk_arc.isChecked() and top_data_selection != 'Archive data':
+        # Plot archive first as background unless archive is explicitly selected as top layer.
         # print('in refresh plot, calling show_archive first to allow new data on top')
         n_plotted_arc = show_archive(self)
         # print('n_plotted_arc = ', n_plotted_arc)
@@ -767,7 +794,7 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
             # DEBUG: failed to plot time diff
             pass
 
-    if self.top_data_cbox.currentText() == 'Archive data':  # option: plot archive data last on top of any new data
+    if self.show_data_chk_arc.isChecked() and top_data_selection == 'Archive data':  # option: plot archive data last on top of any new data
         # DEBUG: calling show_archive
         n_plotted_arc = show_archive(self)
         # DEBUG: n_plotted_arc = n_plotted_arc
@@ -2571,8 +2598,9 @@ def add_grid_lines(self):
     # adjust gridlines for swath, histogram, and data rate plots
     for ax in [self.swath_ax, self.backscatter_ax, self.pingmode_ax, self.pulseform_ax, self.swathmode_ax, self.frequency_ax, self.hist_ax, self.data_rate_ax1, self.data_rate_ax2, self.time_ax1]:
         if self.grid_lines_toggle_chk.isChecked():  # turn on grid lines
-            ax.grid()
-            ax.grid(which='both', linestyle='-', linewidth='0.5', color='black')
+            # Make major (annotation-interval) lines more prominent than minor lines.
+            ax.grid(which='major', linestyle='-', linewidth=0.8, color='black', alpha=0.85)
+            ax.grid(which='minor', linestyle='-', linewidth=0.35, color='black', alpha=0.55)
             ax.minorticks_on()
 
         else:
@@ -3166,6 +3194,50 @@ def clear_plot(self):
 
 def archive_data(self):
     # save (pickle) the detection dictionary for future import to compare performance over time
+    def has_coverage_data():
+        if not hasattr(self, 'det') or not isinstance(self.det, dict):
+            return False
+        y_port = self.det.get('y_port', [])
+        z_port = self.det.get('z_port', [])
+        return len(y_port) > 0 and len(z_port) > 0
+
+    # If coverage has not been calculated yet, calculate it now from loaded source files.
+    if not has_coverage_data():
+        source_files = [f for f in getattr(self, 'filenames', [])
+                        if f and isinstance(f, str) and f.endswith(('.all', '.kmall'))]
+
+        if not source_files:
+            update_log(self, 'No source files available for archiving.')
+            QtWidgets.QMessageBox.warning(
+                self,
+                'No Source Files',
+                'No .all or .kmall source files are loaded.\n\n'
+                'Add source files, then run Convert to Archive PKL again.'
+            )
+            return
+
+        update_log(self, 'Coverage not found; calculating coverage automatically before archiving...')
+        try:
+            calc_coverage(self, params_only=False)
+        except Exception as e:
+            update_log(self, f'Automatic coverage calculation failed: {str(e)}')
+            QtWidgets.QMessageBox.critical(
+                self,
+                'Coverage Calculation Failed',
+                f'Could not calculate coverage before archiving:\n{str(e)}'
+            )
+            return
+
+        if not has_coverage_data():
+            update_log(self, 'Coverage calculation completed but no sounding data was available to archive.')
+            QtWidgets.QMessageBox.warning(
+                self,
+                'No Data to Archive',
+                'Coverage calculation did not produce sounding data.\n\n'
+                'Please verify the selected files contain valid swath data.'
+            )
+            return
+
     # Load last used archive directory
     config = load_session_config()
     last_archive_dir = config.get("last_archive_save_dir", self.archive_save_dir)
@@ -3179,7 +3251,8 @@ def archive_data(self):
 
     else:  # archive data to selected file
         fname_out = archive_name[0]
-        det_archive = self.det  # store new dictionary that can be reloaded / expanded in future sessions
+        # Use a copy so metadata additions do not mutate the live plotting dict.
+        det_archive = deepcopy(self.det)  # store dictionary that can be reloaded / expanded in future sessions
         det_archive['model_name'] = self.model_name
         det_archive['ship_name'] = self.ship_name
         det_archive['cruise_name'] = self.cruise_name
@@ -3195,19 +3268,15 @@ def archive_data(self):
             'version': '2.1',
             'compressed': use_compression
         }
+        update_log(self, f'Archiving {len(det_archive.get("y_port", []))} pings to {os.path.basename(fname_out)}...')
         
         # Save as pickle file (compressed or uncompressed)
         if use_compression:
             import gzip
             with gzip.open(fname_out, 'wb', compresslevel=6) as f:
                 pickle.dump(det_archive, f, protocol=pickle.HIGHEST_PROTOCOL)
-            
-            # Calculate and show compression ratio
-            original_size = len(pickle.dumps(det_archive, protocol=pickle.HIGHEST_PROTOCOL))
             compressed_size = os.path.getsize(fname_out)
-            compression_ratio = (1 - compressed_size / original_size) * 100
-            
-            update_log(self, f'Archived data to {fname_out.rsplit("/")[-1]} (compressed, {compression_ratio:.1f}% smaller)')
+            update_log(self, f'Archived data to {fname_out.rsplit("/")[-1]} (compressed, {compressed_size / (1024 * 1024):.2f} MB)')
         else:
             with open(fname_out, 'wb') as f:
                 pickle.dump(det_archive, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -3357,7 +3426,10 @@ def show_archive(self):
             self.frequency_canvas.draw()
             self.data_canvas.draw()
             archive_key_count += 1
-    except:
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        update_log(self, f'Failed to plot archive data: {str(e)}')
         error_msg = QtWidgets.QMessageBox()
         error_msg.setText('No archive data loaded.  Please load archive data.')
 

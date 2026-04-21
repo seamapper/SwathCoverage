@@ -27,17 +27,17 @@ def add_files(self, ftype_filter, input_dir='HOME', include_subdir=False, multis
 		try:
 			# For tide files, always use swath_accuracy_lib since swath_coverage_lib doesn't support tide directories
 			if 'tid' in ftype_filter or 'Tide' in ftype_filter:
-				from multibeam_tools.libs.swath_accuracy_lib import load_session_config
+				from libs.swath_accuracy_lib import load_session_config
 				config = load_session_config()
 				default_dir = config.get("last_tide_dir", default_dir)
 				print(f"DEBUG: Found tide filter, using swath_accuracy_lib, last_tide_dir: {default_dir}")
 			else:
 				# Try swath coverage config first, fall back to swath accuracy config
 				try:
-					from multibeam_tools.libs.swath_coverage_lib import load_session_config
+					from libs.swath_coverage_lib import load_session_config
 					config = load_session_config()
 				except ImportError:
-					from multibeam_tools.libs.swath_accuracy_lib import load_session_config
+					from libs.swath_accuracy_lib import load_session_config
 					config = load_session_config()
 				
 				# Use appropriate directory based on file type
@@ -86,13 +86,13 @@ def add_files(self, ftype_filter, input_dir='HOME', include_subdir=False, multis
 				if file_dir:
 					# For tide files, always use swath_accuracy_lib since swath_coverage_lib doesn't support tide directories
 					if 'tid' in ftype_filter or 'Tide' in ftype_filter:
-						from multibeam_tools.libs.swath_accuracy_lib import update_last_directory
+						from libs.swath_accuracy_lib import update_last_directory
 						update_last_directory("last_tide_dir", file_dir)
 						print(f"DEBUG: Saving tide directory (swath_accuracy): {file_dir}")
 					else:
 						# Try to save to swath coverage config first, fall back to swath accuracy config
 						try:
-							from multibeam_tools.libs.swath_coverage_lib import update_last_directory
+							from libs.swath_coverage_lib import update_last_directory
 							if 'all' in ftype_filter or 'kmall' in ftype_filter or 'ASCII' in ftype_filter or 'Crossline' in ftype_filter:
 								update_last_directory("last_crossline_dir", file_dir)
 							elif 'pkl' in ftype_filter or 'archive' in ftype_filter.lower() or 'Saved swath coverage data' in ftype_filter:
@@ -104,7 +104,7 @@ def add_files(self, ftype_filter, input_dir='HOME', include_subdir=False, multis
 							elif 'xyd' in ftype_filter or 'Density surface' in ftype_filter:
 								update_last_directory("last_xyd_dir", file_dir)
 						except ImportError:
-							from multibeam_tools.libs.swath_accuracy_lib import update_last_directory
+							from libs.swath_accuracy_lib import update_last_directory
 							if 'all' in ftype_filter or 'kmall' in ftype_filter or 'ASCII' in ftype_filter or 'Crossline' in ftype_filter:
 								update_last_directory("last_crossline_dir", file_dir)
 							elif 'pkl' in ftype_filter or 'archive' in ftype_filter.lower() or 'Saved swath coverage data' in ftype_filter:
@@ -213,12 +213,12 @@ def get_output_dir(self):
 	try:
 		# Load last used output directory - try swath coverage config first, fall back to swath accuracy config
 		try:
-			from multibeam_tools.libs.swath_coverage_lib import load_session_config, update_last_directory
+			from libs.swath_coverage_lib import load_session_config, update_last_directory
 			config = load_session_config()
 			last_dir = config.get("last_output_dir", os.getenv('HOME'))
 		except ImportError:
 			# Fall back to swath accuracy config if swath coverage config is not available
-			from multibeam_tools.libs.swath_accuracy_lib import load_session_config, update_last_directory
+			from libs.swath_accuracy_lib import load_session_config, update_last_directory
 			config = load_session_config()
 			last_dir = config.get("last_output_dir", os.getenv('HOME'))
 		

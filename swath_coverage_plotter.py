@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.05" 
+__version__ = "2026.07" 
 
 # BSD-3-Clause License
 #
@@ -708,6 +708,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.clr_file_btn = PushButton('Remove All Files', btnw, btnh, 'clr_file_btn', 'Remove all files')
         self.archive_data_btn = PushButton('Convert to Archive PKL', btnw, btnh, 'archive_data_btn',
                                            'Archive current data from new files to a .pkl file')
+        self.archive_data_btn.setEnabled(False)  # Enable only after coverage has been calculated
         self.load_archive_btn = PushButton('Add Archive PKL', btnw, btnh, 'load_archive_btn',
                                            'Add archive data from a .pkl file')
         self.archive_compression_chk = CheckBox('Enable compression', True, 'archive_compression_chk',
