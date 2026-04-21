@@ -15,7 +15,7 @@ Features:
 
 Author: Paul Johnson
 """
-__version__ = "2026.03"  
+__version__ = "2026.04"  
 
 import sys
 import os

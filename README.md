@@ -23,6 +23,7 @@ A standalone GUI application that converts Kongsberg multibeam data files (KMALL
 - **Simple GUI Interface**: Easy-to-use graphical interface for file selection and conversion (Fusion dark theme)
 - **Batch Processing**: Convert multiple files at once
 - **Directory Support**: Add entire directories with optional recursive subdirectory search
+- **Archive Mode**: Optional `Make Archive PKL` mode creates a single archive PKL from all selected raw files
 - **Progress Tracking**: Real-time progress bar and status updates
 - **Compression Support**: Optional gzip compression for 30-70% smaller files
 - **Error Handling**: Comprehensive error reporting and logging
@@ -49,7 +50,9 @@ Executables are named `KMALL_to_SwathPKL_Converter_v` + version from the code.
    - Enable "Include Subdirectories" checkbox to recursively search subdirectories
 3. Choose an output directory for the converted PKL files
 4. Optionally enable compression for smaller file sizes
-5. Click "Start Conversion" and monitor progress
+5. Optional: enable **Make Archive PKL** to output one archive file instead of per-file PKLs
+6. If archive mode is enabled, enter the archive basename when prompted
+7. Click "Start Conversion" and monitor progress
 
 ---
 
@@ -67,6 +70,7 @@ A comprehensive GUI application for analyzing and visualizing multibeam echosoun
 - **Coverage Trend Analysis**: Calculate, edit, digitize, and export swath coverage trends
 - **Data Filtering**: Filter by angle, depth, width, backscatter, ping interval, and runtime parameters
 - **Archive Management**: Archive processed data for later comparison
+- **Archive Conversion from Raw Files**: "Convert to Archive PKL" can auto-calculate coverage first when needed
 - **Export Functionality**: Save all plots and export coverage trends (e.g., for Gap Filler)
 - **Parameter Search**: Search acquisition parameters by mode, frequency, angles, and more
 - **Theoretical Performance**: Overlay theoretical coverage specification curves
@@ -92,10 +96,11 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
    - **Raw Files tab**: Add KMALL/ALL files and click "Calc Coverage"
    - **Swath PKL tab**: Load pre-converted PKL files (faster loading)
    - **Archive PKL tab**: Load previously archived data for comparison
-3. Configure plot settings on the **Plot** tab (colors, limits, point style, etc.)
-4. Apply filters on the **Filter** tab as needed
-5. Explore plots across the nine center-panel tabs
-6. Use the **Trend** tab to calculate or digitize a coverage trend and export it
+3. Optional: click **Convert to Archive PKL** in Raw Files; if coverage has not been calculated yet, the app will calculate coverage automatically before archiving
+4. Configure plot settings on the **Plot** tab (colors, limits, point style, etc.)
+5. Apply filters on the **Filter** tab as needed
+6. Explore plots across the nine center-panel tabs
+7. Use the **Trend** tab to calculate or digitize a coverage trend and export it
 
 ---
 
@@ -231,6 +236,16 @@ pyinstaller SwathCoveragePlotter.spec --clean
 pyinstaller KMALL_to_PKL_Converter.spec --clean
 ```
 
+Project build scripts are also included:
+
+```bash
+# Swath Coverage Plotter only
+build_swath_coverage_exe.bat
+
+# KMALL to Swath PKL Converter only
+build_kmall_exe.bat
+```
+
 Output is placed in the `dist/` folder, named with the current version (e.g., `Swath_Coverage_Plotter_v2026.03.exe`).
 
 ---
@@ -333,6 +348,11 @@ The **Trend** tab provides a full workflow for determining and exporting the swa
 
 5. **File Permission Errors when writing PKL files**
    - Choose a different output directory or run as administrator
+
+6. **Archive PKL loads but plots 0 soundings**
+   - Confirm the archive file is not tiny/empty (for example, around 1 KB usually indicates no coverage data)
+   - For plotter-created archives, prefer using **Convert to Archive PKL** after loading raw files; it now auto-calculates coverage if needed
+   - Check active filters (angle/depth/width/backscatter/runtime) and temporarily disable them to verify raw plotting
 
 ### Getting Help
 

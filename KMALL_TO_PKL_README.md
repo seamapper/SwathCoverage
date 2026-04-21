@@ -7,6 +7,7 @@ A standalone GUI application to convert KMALL and ALL files to optimized PKL fil
 - **Simple GUI Interface**: Easy-to-use graphical interface (Fusion dark theme) for file selection and conversion
 - **Batch Processing**: Convert multiple files at once
 - **Directory Support**: Add entire directories; optional "Include Subdirectories" to search recursively
+- **Archive Mode**: Optional **Make Archive PKL** mode creates one archive PKL from all selected raw files
 - **Progress Tracking**: Real-time progress bar and status updates
 - **Compression Support**: Optional gzip compression for 30-70% smaller files
 - **Overwrite Option**: Option to overwrite existing PKL files
@@ -63,13 +64,16 @@ python kmall_to_pkl_converter.py
 
 ### Method 2: Windows Executable
 ```bash
-KMALL_to_SwathPKL_Converter_v2026.01.exe
+KMALL_to_SwathPKL_Converter_v2026.03.exe
 ```
 Executables are named `KMALL_to_SwathPKL_Converter_v` + version (from the script). Build with (run from the project directory):
 ```bash
 pyinstaller KMALL_to_PKL_Converter.spec --clean
 ```
-Or run the project’s `build_exe.ps1` script to build the converter executable.
+Or run the project build script:
+```bash
+build_kmall_exe.bat
+```
 
 ## How to Use
 
@@ -87,9 +91,12 @@ Or run the project’s `build_exe.ps1` script to build the converter executable.
 4. **Set Options**
    - **Enable compression**: For smaller files (recommended). Uncheck for faster conversion and larger files.
    - **Overwrite existing PKL files**: Check to replace existing outputs; leave unchecked to skip files that are already up-to-date.
+   - **Make Archive PKL**: When enabled, replaces per-file output and creates one archive PKL from all selected raw files.
 
 5. **Start Conversion**
-   - Click "Start Conversion" and monitor the progress bar and log. A summary dialog appears when done.
+   - Click "Start Conversion" and monitor the progress bar and log.
+   - If **Make Archive PKL** is enabled, enter the archive basename when prompted.
+   - A summary dialog appears when done.
 
 6. **Review Results**
    - Check the summary and log for converted, skipped, and failed counts and any errors.
@@ -99,6 +106,10 @@ Or run the project’s `build_exe.ps1` script to build the converter executable.
 The converter creates PKL files with the following naming convention:
 - Input: `survey_data.kmall`
 - Output: `survey_data.pkl`
+
+In **Make Archive PKL** mode:
+- Output: `<archive_basename>.pkl`
+- Contents: one archive detection dictionary combining all selected files, compatible with the plotter's Archive PKL loader.
 
 ### PKL File Contents
 Each PKL file contains optimized data structures for fast loading:
@@ -169,9 +180,10 @@ If you encounter issues:
 ### Data Processing
 1. **Parse**: Extract data from KMALL/ALL files
 2. **Process**: Convert to plotting-compatible format
-3. **Optimize**: Create efficient data structures
-4. **Compress**: Apply gzip compression (optional)
-5. **Save**: Write optimized PKL file
+3. **Mode Handling**: Apply mode interpretation and coverage sorting compatible with plotter expectations
+4. **Optimize**: Create efficient data structures
+5. **Compress**: Apply gzip compression (optional)
+6. **Save**: Write optimized PKL output (per-file or archive)
 
 ## License
 
@@ -179,6 +191,7 @@ This converter is part of the Swath Coverage Analysis Tools project. See the pro
 
 ## Version History
 
+- **v2026.03**: Added **Make Archive PKL** mode with basename prompt and single-file archive output compatible with plotter archive loading
 - **v2026.01**: Dark theme (Fusion + dark palette); executable naming `KMALL_to_SwathPKL_Converter_v` + version
 - **v2025.02**: Include subdirectories when adding a directory; updated executable naming
 - **v2025.01**: Initial release
