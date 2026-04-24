@@ -71,6 +71,7 @@ A comprehensive GUI application for analyzing and visualizing multibeam echosoun
 - **Data Filtering**: Filter by angle, depth, width, backscatter, ping interval, and runtime parameters
 - **Archive Management**: Archive processed data for later comparison
 - **Archive Conversion from Raw Files**: "Convert to Archive PKL" can auto-calculate coverage first when needed
+- **Archive Conversion from Swath PKL**: "Convert to Archive PKL" on the Swath PKL tab converts loaded Swath PKL data directly to one Archive PKL
 - **Export Functionality**: Save all plots and export coverage trends (e.g., for Gap Filler)
 - **Parameter Search**: Search acquisition parameters by mode, frequency, angles, and more
 - **Theoretical Performance**: Overlay theoretical coverage specification curves
@@ -96,7 +97,9 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
    - **Raw Files tab**: Add KMALL/ALL files and click "Calc Coverage"
    - **Swath PKL tab**: Load pre-converted PKL files (faster loading)
    - **Archive PKL tab**: Load previously archived data for comparison
-3. Optional: click **Convert to Archive PKL** in Raw Files; if coverage has not been calculated yet, the app will calculate coverage automatically before archiving
+3. Optional archive creation paths:
+   - **Raw Files tab**: click **Convert to Archive PKL**; if coverage has not been calculated yet, the app will calculate coverage automatically before archiving
+   - **Swath PKL tab**: click **Convert to Archive PKL** to convert loaded Swath PKL data to a single archive (prompts for parent directory and archive basename)
 4. Configure plot settings on the **Plot** tab (colors, limits, point style, etc.)
 5. Apply filters on the **Filter** tab as needed
 6. Explore plots across the nine center-panel tabs
@@ -109,7 +112,7 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 ### Left Panel — Sources & Log
 - **Sources** groupbox (tabbed):
   - *Raw Files*: file list, Raw File Management, Process Raw Files (Calc Coverage, Scan Params Only, Convert to Swath PKL, Convert to Archive PKL)
-  - *Swath PKL*: file list, Swath PKL Management
+  - *Swath PKL*: file list, Swath PKL Management (Add/Remove/Clear/Add Directory, Convert to Archive PKL)
   - *Archive PKL*: file list, Archive PKL Management
   - *Spec Curve*: specification curve files
 - **Export Plots** groupbox: Save All Plots button
@@ -351,7 +354,8 @@ The **Trend** tab provides a full workflow for determining and exporting the swa
 
 6. **Archive PKL loads but plots 0 soundings**
    - Confirm the archive file is not tiny/empty (for example, around 1 KB usually indicates no coverage data)
-   - For plotter-created archives, prefer using **Convert to Archive PKL** after loading raw files; it now auto-calculates coverage if needed
+   - For plotter-created archives from raw files, **Convert to Archive PKL** now auto-calculates coverage if needed
+   - For Swath PKL workflows, use **Swath PKL tab → Convert to Archive PKL** after loading PKL files
    - Check active filters (angle/depth/width/backscatter/runtime) and temporarily disable them to verify raw plotting
 
 ### Getting Help

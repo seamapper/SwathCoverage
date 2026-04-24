@@ -627,15 +627,25 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
             # If any UI element is missing, skip silently
             pass
 
-        # If width filter is enabled, always sync custom Swath Width (x-limit) to Max Width.
+        # If width filter is enabled, sync custom Swath Width (x-limit) to Max Width once per enable.
+        # This avoids continuously forcing max_x_tb and lets users edit both values independently afterward.
         try:
             width_gb = getattr(self, 'width_gb', None)
-            if width_gb is not None and width_gb.isChecked():
-                if getattr(self, 'plot_lim_gb', None):
-                    if not self.plot_lim_gb.isChecked():
-                        self.plot_lim_gb.setChecked(True)
-                if hasattr(self, 'max_width_tb') and hasattr(self, 'max_x_tb'):
-                    self.max_x_tb.setText(self.max_width_tb.text())
+            if width_gb is not None:
+                # Reset one-shot flag when width filter is turned off
+                if not width_gb.isChecked() and hasattr(self, '_width_limits_synced'):
+                    self._width_limits_synced = False
+
+                if width_gb.isChecked():
+                    if not hasattr(self, '_width_limits_synced'):
+                        self._width_limits_synced = False
+
+                    if not self._width_limits_synced:
+                        if getattr(self, 'plot_lim_gb', None) and not self.plot_lim_gb.isChecked():
+                            self.plot_lim_gb.setChecked(True)
+                        if hasattr(self, 'max_width_tb') and hasattr(self, 'max_x_tb'):
+                            self.max_x_tb.setText(self.max_width_tb.text())
+                        self._width_limits_synced = True
         except Exception:
             pass
 
@@ -3290,6 +3300,113 @@ def archive_data(self):
             config = load_session_config()
             config["last_archive_save_dir"] = archive_dir
             save_session_config(config)
+
+
+def convert_swath_pkl_to_archive(self):
+    """Convert currently loaded Swath PKL data into a single Archive PKL."""
+    swath_pkl_count = self.swath_pkl_file_list.count() if hasattr(self, 'swath_pkl_file_list') else 0
+    if swath_pkl_count == 0:
+        update_log(self, 'No Swath PKL files loaded to convert.')
+        QtWidgets.QMessageBox.warning(
+            self,
+            'No Swath PKL Data',
+            'No Swath PKL files are currently loaded.\n\n'
+            'Load Swath PKL files on the Swath PKL tab, then try again.'
+        )
+        return
+
+    has_det = isinstance(getattr(self, 'det', None), dict)
+    has_cov = has_det and len(self.det.get('y_port', [])) > 0 and len(self.det.get('z_port', [])) > 0
+    if not has_cov:
+        update_log(self, 'No processed Swath PKL coverage data available to archive.')
+        QtWidgets.QMessageBox.warning(
+            self,
+            'No Coverage Data',
+            'Swath PKL files are listed, but no processed coverage data is loaded.\n\n'
+            'Reload the Swath PKL files and try again.'
+        )
+        return
+
+    config = load_session_config()
+    start_dir = config.get("last_archive_save_dir", getattr(self, 'archive_save_dir', os.getcwd()))
+
+    parent_dir = QtWidgets.QFileDialog.getExistingDirectory(
+        self,
+        'Select parent directory for archive output',
+        start_dir
+    )
+    if not parent_dir:
+        update_log(self, 'Swath PKL to Archive conversion cancelled (no output directory selected).')
+        return
+
+    basename, ok = QtWidgets.QInputDialog.getText(
+        self,
+        'Archive Basename',
+        'Enter archive PKL basename:'
+    )
+    if not ok:
+        update_log(self, 'Swath PKL to Archive conversion cancelled (no basename provided).')
+        return
+
+    archive_basename = (basename or '').strip()
+    if not archive_basename:
+        QtWidgets.QMessageBox.warning(self, 'Invalid Basename', 'Archive basename cannot be empty.')
+        return
+
+    invalid_chars = '<>:"/\\|?*'
+    if any(ch in archive_basename for ch in invalid_chars):
+        QtWidgets.QMessageBox.warning(
+            self,
+            'Invalid Basename',
+            f'Archive basename cannot contain these characters:\n{invalid_chars}'
+        )
+        return
+
+    fname_out = os.path.join(parent_dir, f'{archive_basename}.pkl')
+    if os.path.exists(fname_out):
+        overwrite = QtWidgets.QMessageBox.question(
+            self,
+            'Overwrite Existing File?',
+            f'Archive file already exists:\n{fname_out}\n\nOverwrite it?',
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No
+        )
+        if overwrite != QtWidgets.QMessageBox.StandardButton.Yes:
+            update_log(self, 'Swath PKL to Archive conversion cancelled (existing file not overwritten).')
+            return
+
+    det_archive = deepcopy(self.det)
+    det_archive['model_name'] = self.model_name
+    det_archive['ship_name'] = self.ship_name
+    det_archive['cruise_name'] = self.cruise_name
+
+    use_compression = True
+    if hasattr(self, 'archive_compression_chk'):
+        use_compression = self.archive_compression_chk.isChecked()
+
+    det_archive['_archive_metadata'] = {
+        'archive_time': datetime.datetime.now().isoformat(),
+        'version': '2.1',
+        'compressed': use_compression,
+        'source_type': 'swath_pkl',
+        'source_file_count': swath_pkl_count
+    }
+
+    update_log(self, f'Converting loaded Swath PKL data ({swath_pkl_count} files) to archive...')
+    if use_compression:
+        import gzip
+        with gzip.open(fname_out, 'wb', compresslevel=6) as f:
+            pickle.dump(det_archive, f, protocol=pickle.HIGHEST_PROTOCOL)
+        file_size_mb = os.path.getsize(fname_out) / (1024 * 1024)
+        update_log(self, f'Archived Swath PKL data to {os.path.basename(fname_out)} (compressed, {file_size_mb:.2f} MB)')
+    else:
+        with open(fname_out, 'wb') as f:
+            pickle.dump(det_archive, f, protocol=pickle.HIGHEST_PROTOCOL)
+        update_log(self, f'Archived Swath PKL data to {os.path.basename(fname_out)} (uncompressed)')
+
+    self.archive_save_dir = parent_dir
+    config["last_archive_save_dir"] = parent_dir
+    save_session_config(config)
 
 def load_archive(self):
     from PyQt6.QtWidgets import QFileDialog

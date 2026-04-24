@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.07" 
+__version__ = "2026.08" 
 
 # BSD-3-Clause License
 #
@@ -302,6 +302,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.clear_archive_btn.clicked.connect(self.clear_all_archive_files)
         self.remove_swath_pkl_btn.clicked.connect(self.remove_selected_swath_pkl_files)
         self.clear_swath_pkl_btn.clicked.connect(self.clear_all_swath_pkl_files)
+        self.convert_swath_pkl_archive_btn.clicked.connect(lambda: convert_swath_pkl_to_archive(self))
         self.load_swath_pkl_btn.clicked.connect(lambda: load_swath_pkl(self))
         self.get_pkl_dir_btn.clicked.connect(self.add_pkl_files_from_directory)
         self.convert_pickle_btn.clicked.connect(lambda: convert_files_to_pickle(self))
@@ -751,6 +752,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Swath PKL file management buttons
         self.remove_swath_pkl_btn = PushButton('Remove Selected', btnw, btnh, 'remove_swath_pkl_btn', 'Remove selected Swath PKL files')
         self.clear_swath_pkl_btn = PushButton('Remove All', btnw, btnh, 'clear_swath_pkl_btn', 'Remove all Swath PKL files')
+        self.convert_swath_pkl_archive_btn = PushButton('Convert to Archive PKL', btnw, btnh, 'convert_swath_pkl_archive_btn',
+                                                        'Convert loaded Swath PKL data into one Archive PKL file')
         
         # Archive file management buttons
         self.remove_archive_btn = PushButton('Remove Selected', btnw, btnh, 'remove_archive_btn', 'Remove selected archive files')
@@ -826,7 +829,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Swath PKL buttons - create horizontal layouts for Add/Remove button pairs
         add_remove_layout = BoxLayout([self.load_swath_pkl_btn, self.remove_swath_pkl_btn], 'h')
         dir_clear_layout = BoxLayout([self.get_pkl_dir_btn, self.clear_swath_pkl_btn], 'h')
-        swath_pkl_btn_layout = BoxLayout([add_remove_layout, dir_clear_layout, self.include_pkl_subdir_chk], 'v')
+        swath_pkl_btn_layout = BoxLayout([add_remove_layout, dir_clear_layout, self.convert_swath_pkl_archive_btn, self.include_pkl_subdir_chk], 'v')
         swath_pkl_btn_gb = GroupBox('Swath PKL Management', swath_pkl_btn_layout, False, False, 'swath_pkl_btn_gb')
         
         # Show path checkbox for swath PKL sources
@@ -1833,7 +1836,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # add water depth multiple (N*WD) line controls in checkable groupbox
         n_wd_lines_lbl_max = Label('Max:', width=50, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-        self.n_wd_lines_tb_max = LineEdit('6', 40, 20, 'n_wd_lines_tb_max', 'Set the N*WD lines maximum (0-10 WD)')
+        self.n_wd_lines_tb_max = LineEdit('7', 40, 20, 'n_wd_lines_tb_max', 'Set the N*WD lines maximum (0-10 WD)')
         self.n_wd_lines_tb_max.setValidator(QDoubleValidator(0, 20, 2))
         n_wd_lines_lbl_int = Label('Interval:', width=50, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         self.n_wd_lines_tb_int = LineEdit('1', 40, 20, 'n_wd_lines_tb_int', 'Set the N*WD lines interval (0.5-5 WD)')
