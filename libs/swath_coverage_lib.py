@@ -956,6 +956,19 @@ def update_show_data_checks_coverage(self):
 
 def add_plot_features(self, ax, is_archive=False):
     """Add angle lines, water depth lines, reference text, and specification lines to any axis"""
+    # Remove prior overlay artists added by this helper so repeated calls (e.g.,
+    # multi-pass plotting/export flows) do not duplicate labels/lines.
+    overlay_gids = {
+        'overlay_wd_line', 'overlay_wd_label',
+        'overlay_angle_line', 'overlay_angle_label',
+        'overlay_ref_text'
+    }
+    for artist in list(ax.lines) + list(ax.texts):
+        try:
+            if artist.get_gid() in overlay_gids:
+                artist.remove()
+        except Exception:
+            pass
     
     # Add water depth multiple lines if checked
     if self.n_wd_lines_gb.isChecked():  # plot WD lines if checked
@@ -965,8 +978,9 @@ def add_plot_features(self, ax, is_archive=False):
         for ps in [-1, 1]:  # port and starboard
             for n in range(1, int(np.floor(n_wd_lines_max / n_wd_lines_int) + 1)):
                 # plot WD lines (corrected calculation from original add_WD_lines)
-                ax.plot([0, ps * n * n_wd_lines_int * self.swath_ax_margin * self.z_max / 2],
-                        [0, self.swath_ax_margin * self.z_max], 'k', linewidth=1, clip_on=True)
+                wd_line = ax.plot([0, ps * n * n_wd_lines_int * self.swath_ax_margin * self.z_max / 2],
+                                  [0, self.swath_ax_margin * self.z_max], 'k', linewidth=1, clip_on=True)[0]
+                wd_line.set_gid('overlay_wd_line')
                 
                 # add WD line labels (corrected from original add_WD_lines)
                 x_mag = 0.9 * n * n_wd_lines_int * self.z_max / 2  # set magnitude of text locations to 90% of line end
@@ -977,12 +991,13 @@ def add_plot_features(self, ax, is_archive=False):
                     x_mag = 0.9 * self.x_max
                     y_mag = 2 * x_mag / (n * n_wd_lines_int)  # scale y location with limited x location
 
-                ax.text(x_mag * ps, y_mag, str(n * n_wd_lines_int) + 'X',
-                        verticalalignment='center',
-                        horizontalalignment='center',
-                        bbox=dict(facecolor='white', edgecolor='none',
-                                 alpha=1, pad=0.0),
-                        clip_on=True)
+                wd_label = ax.text(x_mag * ps, y_mag, str(n * n_wd_lines_int) + 'X',
+                                   verticalalignment='center',
+                                   horizontalalignment='center',
+                                   bbox=dict(facecolor='white', edgecolor='none',
+                                            alpha=1, pad=0.0),
+                                   clip_on=True)
+                wd_label.set_gid('overlay_wd_label')
     
     # Add swath angle lines if checked
     # DEBUG: ANGLE LINES VERSION CHECK: This is the NEW version with enhanced labeling
@@ -997,7 +1012,8 @@ def add_plot_features(self, ax, is_archive=False):
                 y_line_mag = x_line_mag / np.tan(np.radians(angle))
                 
                 # Always plot the angle line (remove the filtering condition)
-                ax.plot([0, ps * x_line_mag], [0, y_line_mag], 'k', linewidth=1, clip_on=True)
+                angle_line = ax.plot([0, ps * x_line_mag], [0, y_line_mag], 'k', linewidth=1, clip_on=True)[0]
+                angle_line.set_gid('overlay_angle_line')
                 
                 # Add angle line labels (restored from add_nominal_angle_lines)
                 x_label_mag = 0.9 * x_line_mag  # set magnitude of text locations to 90% of line end
@@ -1013,11 +1029,12 @@ def add_plot_features(self, ax, is_archive=False):
                     y_label_mag = 0.9 * self.z_max
                     x_label_mag = y_label_mag * np.tan(np.radians(angle))
 
-                ax.text(x_label_mag * ps, y_label_mag,
-                       str(int(angle)) + '\xb0',
-                       verticalalignment='center', horizontalalignment='center',
-                       bbox=dict(facecolor='white', edgecolor='none', alpha=1, pad=0.0),
-                       clip_on=True)
+                angle_label = ax.text(x_label_mag * ps, y_label_mag,
+                                      str(int(angle)) + '\xb0',
+                                      verticalalignment='center', horizontalalignment='center',
+                                      bbox=dict(facecolor='white', edgecolor='none', alpha=1, pad=0.0),
+                                      clip_on=True)
+                angle_label.set_gid('overlay_angle_label')
     
     # Add reference/filter text if checked
     if self.show_ref_fil_chk.isChecked():
@@ -1045,10 +1062,11 @@ def add_plot_features(self, ax, is_archive=False):
         ref_str += '\nMax. point count: ' + str(int(self.n_points_max))
         ref_str += '\nDecimation factor: ' + "%.1f" % self.dec_fac
         
-        ax.text(0.02, 0.98, ref_str,
-                transform=ax.transAxes, fontsize=8,
-                verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        ref_text = ax.text(0.02, 0.98, ref_str,
+                           transform=ax.transAxes, fontsize=8,
+                           verticalalignment='top',
+                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        ref_text.set_gid('overlay_ref_text')
     
     # Add specification lines if checked
     if self.spec_chk.isChecked():  # plot spec lines if checked
@@ -2421,6 +2439,7 @@ def update_axes(self):
     self.title_str_pulseform = 'Swath Width vs. Depth - Pulse Form\n' + sys_info_str
     self.title_str_swathmode = 'Swath Width vs. Depth - Swath Mode\n' + sys_info_str
     self.title_str_frequency = 'Swath Width vs. Depth - Frequency\n' + sys_info_str
+    self.title_str_timing = 'Attitude Datagram Time Comparison\n' + sys_info_str
 
     self.swath_figure.suptitle(self.title_str)
     self.backscatter_figure.suptitle(self.title_str_backscatter)
@@ -2430,6 +2449,7 @@ def update_axes(self):
     self.swathmode_figure.suptitle(self.title_str_swathmode)
     self.frequency_figure.suptitle(self.title_str_frequency)
     self.data_figure.suptitle(self.title_str_data)
+    self.time_figure.suptitle(self.title_str_timing)
 
     self.swath_ax.set(xlabel='Swath Coverage (m)', ylabel='Depth (m)')
     self.backscatter_ax.set(xlabel='Swath Coverage (m)', ylabel='Depth (m)')
@@ -2443,6 +2463,56 @@ def update_axes(self):
     self.data_rate_ax2.set(xlabel='Ping interval (s, first swath of ping cycle)', ylabel='Depth (m)')
     self.time_ax1.set(xlabel='SKM datagram header time',
                       ylabel='Time diff (ms, SKM dg hdr - KM binary sample 0)')
+
+    # Display a clear notice when data rate is unavailable for PKL-only sessions.
+    try:
+        if hasattr(self, 'data_rate_notice_artist') and self.data_rate_notice_artist is not None:
+            self.data_rate_notice_artist.remove()
+            self.data_rate_notice_artist = None
+    except Exception:
+        self.data_rate_notice_artist = None
+
+    # Display a clear notice when only PKL-based data are loaded (no raw .all/.kmall timing source).
+    try:
+        if hasattr(self, 'timing_notice_artist') and self.timing_notice_artist is not None:
+            self.timing_notice_artist.remove()
+            self.timing_notice_artist = None
+    except Exception:
+        self.timing_notice_artist = None
+
+    raw_files_loaded = any(
+        isinstance(fname, str) and fname.lower().endswith(('.all', '.kmall'))
+        for fname in getattr(self, 'filenames', [])
+    )
+    swath_pkl_loaded = any(
+        isinstance(fname, str) and fname.lower().endswith('.pkl')
+        for fname in getattr(self, 'filenames', [])
+    ) or (hasattr(self, 'swath_pkl_file_list') and self.swath_pkl_file_list.count() > 0)
+    archive_pkl_loaded = len(getattr(self, 'archive_filenames', [])) > 0 or bool(getattr(self, 'det_archive', {}))
+
+    if (not raw_files_loaded) and (swath_pkl_loaded or archive_pkl_loaded):
+        self.data_rate_notice_artist = self.data_rate_ax1.text(
+            0.5, 0.5,
+            'DATA RATE NOT CURRENTLY\nCALCULATED FOR SWATH/\nARCHIVE PKL DATA',
+            transform=self.data_rate_ax1.transAxes,
+            ha='center',
+            va='center',
+            fontsize=12,
+            fontweight='bold',
+            color='red',
+            bbox=dict(facecolor='white', edgecolor='red', alpha=0.9, boxstyle='round,pad=0.35')
+        )
+        self.timing_notice_artist = self.time_ax1.text(
+            0.5, 0.5,
+            'TIMING NOT PLOTTED FOR SWATH/ARCHIVE PKL DATA',
+            transform=self.time_ax1.transAxes,
+            ha='center',
+            va='center',
+            fontsize=13,
+            fontweight='bold',
+            color='red',
+            bbox=dict(facecolor='white', edgecolor='red', alpha=0.9, boxstyle='round,pad=0.35')
+        )
 
     self.swath_ax.invert_yaxis()  # invert the y axis (and shared histogram axis)
     add_plot_features(self, self.swath_ax, is_archive=False)
@@ -2546,7 +2616,7 @@ def update_hist_axis(self):
     # update the sounding distribution axis and scale the swath axis accordingly
     show_hist = self.show_hist_chk.isChecked()
     n_cols = np.power(10, int(self.show_hist_chk.isChecked()))  # 1 or 10 cols for gridspec, hist in last col if shown
-    gs = gridspec.GridSpec(1, n_cols)
+    gs = gridspec.GridSpec(1, n_cols, figure=self.swath_figure, left=0.07, right=0.97, bottom=0.07, top=0.93, wspace=0.15)
 
     # print('n_cols =', n_cols)
 
@@ -2577,25 +2647,37 @@ def update_other_plot_layouts(self):
     # Update layouts for backscatter, pingmode, pulseform, swathmode, and frequency plots
     # to match depth plot layout - main plot should fill full canvas like depth plot when hist is hidden
     # Use single-row gridspec to fill full width and height, matching depth plot when histogram is off
-    gs_backscatter = gridspec.GridSpec(1, 1, figure=self.backscatter_figure)
+    gs_backscatter = gridspec.GridSpec(1, 1, figure=self.backscatter_figure, left=0.07, right=0.97, bottom=0.07, top=0.93)
     self.backscatter_ax.set_position(gs_backscatter[0].get_position(self.backscatter_figure))
     self.backscatter_ax.set_subplotspec(gs_backscatter[0])
     
-    gs_pingmode = gridspec.GridSpec(1, 1, figure=self.pingmode_figure)
+    gs_pingmode = gridspec.GridSpec(1, 1, figure=self.pingmode_figure, left=0.07, right=0.97, bottom=0.07, top=0.93)
     self.pingmode_ax.set_position(gs_pingmode[0].get_position(self.pingmode_figure))
     self.pingmode_ax.set_subplotspec(gs_pingmode[0])
     
-    gs_pulseform = gridspec.GridSpec(1, 1, figure=self.pulseform_figure)
+    gs_pulseform = gridspec.GridSpec(1, 1, figure=self.pulseform_figure, left=0.07, right=0.97, bottom=0.07, top=0.93)
     self.pulseform_ax.set_position(gs_pulseform[0].get_position(self.pulseform_figure))
     self.pulseform_ax.set_subplotspec(gs_pulseform[0])
     
-    gs_swathmode = gridspec.GridSpec(1, 1, figure=self.swathmode_figure)
+    gs_swathmode = gridspec.GridSpec(1, 1, figure=self.swathmode_figure, left=0.07, right=0.97, bottom=0.07, top=0.93)
     self.swathmode_ax.set_position(gs_swathmode[0].get_position(self.swathmode_figure))
     self.swathmode_ax.set_subplotspec(gs_swathmode[0])
     
-    gs_frequency = gridspec.GridSpec(1, 1, figure=self.frequency_figure)
+    gs_frequency = gridspec.GridSpec(1, 1, figure=self.frequency_figure, left=0.07, right=0.97, bottom=0.07, top=0.93)
     self.frequency_ax.set_position(gs_frequency[0].get_position(self.frequency_figure))
     self.frequency_ax.set_subplotspec(gs_frequency[0])
+
+    # Update data-rate layout (two side-by-side plots) to match top spacing in GUI/export.
+    gs_data = gridspec.GridSpec(1, 2, figure=self.data_figure, left=0.07, right=0.97, bottom=0.07, top=0.93, wspace=0.20)
+    self.data_rate_ax1.set_position(gs_data[0].get_position(self.data_figure))
+    self.data_rate_ax1.set_subplotspec(gs_data[0])
+    self.data_rate_ax2.set_position(gs_data[1].get_position(self.data_figure))
+    self.data_rate_ax2.set_subplotspec(gs_data[1])
+
+    # Match timing-tab top spacing with other plots.
+    gs_timing = gridspec.GridSpec(1, 1, figure=self.time_figure, left=0.07, right=0.97, bottom=0.07, top=0.93)
+    self.time_ax1.set_position(gs_timing[0].get_position(self.time_figure))
+    self.time_ax1.set_subplotspec(gs_timing[0])
 
 
 def update_solid_color(self, field):  # launch solid color dialog and assign to designated color attribute
@@ -2970,11 +3052,15 @@ def save_all_plots(self):
             if os.path.exists(filepath):
                 existing_files.append(filename)
     
-    # Also check for settings file
+    # Also check for settings and analysis export files
     settings_filename = f"{save_name.strip()}_settings.txt"
     settings_filepath = os.path.join(save_dir, settings_filename)
     if os.path.exists(settings_filepath):
         existing_files.append(settings_filename)
+    analysis_filename = f"{save_name.strip()}_analysis_group.json"
+    analysis_filepath = os.path.join(save_dir, analysis_filename)
+    if os.path.exists(analysis_filepath):
+        existing_files.append(analysis_filename)
     
     # Ask user for permission to overwrite if files exist
     if existing_files:
@@ -2990,6 +3076,7 @@ def save_all_plots(self):
     
     # Save filter settings and source files info
     save_settings_info(self, save_dir, save_name.strip())
+    save_analysis_group_json(self, save_dir, save_name.strip())
     
     # Update layouts for all other plots once before saving to ensure proper canvas filling
     update_other_plot_layouts(self)
@@ -3049,9 +3136,21 @@ def save_all_plots(self):
                 ax.set_ylim(ylim)
                 ax.set_autoscale_on(False)
                 # Re-apply gridspec layout like Depth plot does
-                gs = gridspec.GridSpec(1, 1, figure=figure)
+                gs = gridspec.GridSpec(1, 1, figure=figure, left=0.07, right=0.97, bottom=0.07, top=0.93)
                 ax.set_position(gs[0].get_position(figure))
                 ax.set_subplotspec(gs[0])
+            elif plot_type == 'Data_Rate':
+                # Keep export layout for Data Rate tab consistent with GUI spacing.
+                gs_data = gridspec.GridSpec(1, 2, figure=figure, left=0.07, right=0.97, bottom=0.07, top=0.93, wspace=0.20)
+                self.data_rate_ax1.set_position(gs_data[0].get_position(figure))
+                self.data_rate_ax1.set_subplotspec(gs_data[0])
+                self.data_rate_ax2.set_position(gs_data[1].get_position(figure))
+                self.data_rate_ax2.set_subplotspec(gs_data[1])
+            elif plot_type == 'Timing':
+                # Keep export layout for Timing tab consistent with GUI spacing.
+                gs_timing = gridspec.GridSpec(1, 1, figure=figure, left=0.07, right=0.97, bottom=0.07, top=0.93)
+                self.time_ax1.set_position(gs_timing[0].get_position(figure))
+                self.time_ax1.set_subplotspec(gs_timing[0])
             
             # Save with tight bounding box to remove extra whitespace
             figure.savefig(filepath,
@@ -3085,7 +3184,141 @@ def save_all_plots(self):
     # Update the plot save directory
     self.plot_save_dir = parent_dir
     
-    update_log(self, f'Successfully saved {saved_count} out of {len(plot_types)} plots to: {save_dir}')
+    update_log(self, f'Successfully exported analysis group with {saved_count} out of {len(plot_types)} plots to: {save_dir}')
+
+
+def _collect_analysis_source_files(self):
+    def _list_from_widget(widget_attr, original_paths_attr=None, data_role=None):
+        files = []
+        if not hasattr(self, widget_attr):
+            return files
+
+        widget = getattr(self, widget_attr)
+        original_paths = getattr(self, original_paths_attr, {}) if original_paths_attr else {}
+        for i in range(widget.count()):
+            item = widget.item(i)
+            item_text = item.text()
+            if data_role is not None:
+                role_data = item.data(data_role)
+                if role_data:
+                    item_text = role_data
+            if original_paths_attr and isinstance(original_paths, dict):
+                item_text = original_paths.get(i, item_text)
+            if item_text:
+                files.append(item_text)
+        return files
+
+    raw_files = _list_from_widget('file_list', data_role=1)
+    swath_pkl_files = _list_from_widget('swath_pkl_file_list', 'original_swath_pkl_paths')
+    archive_pkl_files = list(getattr(self, 'archive_filenames', []))
+    if not archive_pkl_files:
+        archive_pkl_files = _list_from_widget('archive_file_list', 'original_archive_paths')
+
+    spec_source_paths = getattr(self, 'spec_source_paths', {})
+    spec_curve_files = []
+    if hasattr(self, 'spec_file_list'):
+        for i in range(self.spec_file_list.count()):
+            spec_name = self.spec_file_list.item(i).text()
+            spec_curve_files.append(spec_source_paths.get(spec_name, spec_name))
+
+    return {
+        'raw_files': raw_files,
+        'swath_pkl_files': swath_pkl_files,
+        'archive_pkl_files': archive_pkl_files,
+        'spec_curve_files': spec_curve_files
+    }
+
+
+def _collect_analysis_settings(self):
+    return {
+        'system_information': {
+            'model': self.model_name,
+            'ship': self.ship_name,
+            'cruise': self.cruise_name,
+            'depth_reference': self.ref_cbox.currentText(),
+            'use_custom_system_information': self.custom_info_gb.isChecked() if hasattr(self, 'custom_info_gb') else False,
+            'show_model_in_title': self.show_model_chk.isChecked() if hasattr(self, 'show_model_chk') else True,
+            'show_ship_in_title': self.show_ship_chk.isChecked() if hasattr(self, 'show_ship_chk') else True,
+            'show_cruise_in_title': self.show_cruise_chk.isChecked() if hasattr(self, 'show_cruise_chk') else True
+        },
+        'filter_settings': {
+            'angle_filter_enabled': self.angle_gb.isChecked() if hasattr(self, 'angle_gb') else True,
+            'angle_range_deg': {'min': self.min_angle_tb.text(), 'max': self.max_angle_tb.text()},
+            'depth_filter_enabled': self.depth_gb.isChecked() if hasattr(self, 'depth_gb') else True,
+            'depth_range_new_m': {'min': self.min_depth_tb.text(), 'max': self.max_depth_tb.text()},
+            'depth_range_archive_m': {'min': self.min_depth_arc_tb.text(), 'max': self.max_depth_arc_tb.text()},
+            'width_filter_enabled': self.width_gb.isChecked() if hasattr(self, 'width_gb') else True,
+            'width_range_new_m': {'min': self.min_width_tb.text(), 'max': self.max_width_tb.text()},
+            'width_range_archive_m': {'min': self.min_width_arc_tb.text(), 'max': self.max_width_arc_tb.text()},
+            'backscatter_filter_enabled': self.bs_gb.isChecked() if hasattr(self, 'bs_gb') else True,
+            'backscatter_range_db': {'min': self.min_bs_tb.text(), 'max': self.max_bs_tb.text()},
+            'ping_interval_filter_enabled': self.ping_int_gb.isChecked() if hasattr(self, 'ping_int_gb') else True,
+            'ping_interval_range_sec': {'min': self.min_ping_int_tb.text(), 'max': self.max_ping_int_tb.text()},
+            'point_count_limit_enabled': self.pt_count_gb.isChecked() if hasattr(self, 'pt_count_gb') else True,
+            'max_plotted_points': self.max_count_tb.text(),
+            'decimation_factor': self.dec_fac_tb.text(),
+            'rt_angle_filter_enabled': self.rtp_angle_gb.isChecked() if hasattr(self, 'rtp_angle_gb') else True,
+            'rt_angle_buffer_deg': self.rtp_angle_buffer_tb.text(),
+            'rt_coverage_filter_enabled': self.rtp_cov_gb.isChecked() if hasattr(self, 'rtp_cov_gb') else True,
+            'rt_coverage_buffer_m': self.rtp_cov_buffer_tb.text()
+        },
+        'plot_settings': {
+            'point_size': self.pt_size_cbox.currentText(),
+            'point_opacity_percent': self.pt_alpha_cbox.currentText(),
+            'show_swath_angle_lines': self.angle_lines_gb.isChecked() if hasattr(self, 'angle_lines_gb') else False,
+            'swath_angle_lines_max_deg': self.angle_lines_tb_max.text() if hasattr(self, 'angle_lines_tb_max') else '',
+            'swath_angle_lines_interval_deg': self.angle_lines_tb_int.text() if hasattr(self, 'angle_lines_tb_int') else '',
+            'show_water_depth_multiple_lines': self.n_wd_lines_gb.isChecked() if hasattr(self, 'n_wd_lines_gb') else False,
+            'water_depth_multiple_lines_max': self.n_wd_lines_tb_max.text() if hasattr(self, 'n_wd_lines_tb_max') else '',
+            'water_depth_multiple_lines_interval': self.n_wd_lines_tb_int.text() if hasattr(self, 'n_wd_lines_tb_int') else '',
+            'fixed_color_limits': {
+                'min': self.min_clim_tb.text(),
+                'max': self.max_clim_tb.text()
+            },
+            'set_color_scale_from_filters': self.clim_filter_chk.isChecked() if hasattr(self, 'clim_filter_chk') else False,
+            'show_grid_lines': self.grid_lines_toggle_chk.isChecked(),
+            'show_colorbar_legend': self.colorbar_chk.isChecked(),
+            'show_histogram': self.show_hist_chk.isChecked(),
+            'show_coverage_trend': self.show_coverage_trend_chk.isChecked(),
+            'show_reference_filter_text': self.show_ref_fil_chk.isChecked() if hasattr(self, 'show_ref_fil_chk') else False,
+            'show_specification_lines': self.spec_chk.isChecked() if hasattr(self, 'spec_chk') else False,
+            'show_spec_legend': self.show_spec_legend_chk.isChecked() if hasattr(self, 'show_spec_legend_chk') else False,
+            'apply_color_modes_to_data_plots': self.match_data_cmodes_chk.isChecked() if hasattr(self, 'match_data_cmodes_chk') else True,
+            'show_swath_data': self.show_data_chk.isChecked(),
+            'show_archive_data': self.show_data_chk_arc.isChecked(),
+            'top_data': self.top_data_cbox.currentText(),
+            'color_scale': self.clim_cbox.currentText(),
+            'new_data_color_mode': 'by_type' if self.new_data_color_by_type_radio.isChecked() else 'single_color',
+            'archive_data_color_mode': 'by_type' if self.archive_data_color_by_type_radio.isChecked() else 'single_color',
+            'new_data_single_color': self.color.name() if hasattr(self, 'color') and hasattr(self.color, 'name') else None,
+            'archive_data_single_color': self.color_arc.name() if hasattr(self, 'color_arc') and hasattr(self.color_arc, 'name') else None,
+            'custom_plot_limits': {
+                'enabled': self.plot_lim_gb.isChecked() if hasattr(self, 'plot_lim_gb') else False,
+                'min_depth_m': self.min_z_tb.text() if hasattr(self, 'min_z_tb') else '',
+                'max_depth_m': self.max_z_tb.text(),
+                'max_width_m': self.max_x_tb.text(),
+                'max_data_rate': self.max_dr_tb.text(),
+                'max_ping_interval': self.max_pi_tb.text()
+            }
+        }
+    }
+
+
+def save_analysis_group_json(self, save_dir, save_name):
+    analysis_file = os.path.join(save_dir, f"{save_name}_analysis_group.json")
+    analysis_payload = {
+        'analysis_group_version': '1.0',
+        'exported_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'source_files': _collect_analysis_source_files(self)
+    }
+    analysis_payload.update(_collect_analysis_settings(self))
+
+    try:
+        with open(analysis_file, 'w', encoding='utf-8') as f:
+            json.dump(analysis_payload, f, indent=2)
+        update_log(self, f'Saved analysis group JSON: {os.path.basename(analysis_file)}')
+    except Exception as e:
+        update_log(self, f'Error saving analysis group JSON: {str(e)}')
 
 
 def save_settings_info(self, save_dir, save_name):
@@ -3093,6 +3326,16 @@ def save_settings_info(self, save_dir, save_name):
     settings_file = os.path.join(save_dir, f"{save_name}_settings.txt")
     
     try:
+        def _write_file_section(file_obj, title, files):
+            file_obj.write(f"{title}:\n")
+            file_obj.write("-" * (len(title) + 1) + "\n")
+            if files:
+                for idx, file_path in enumerate(files, 1):
+                    file_obj.write(f"{idx}. {file_path}\n")
+            else:
+                file_obj.write("None loaded\n")
+            file_obj.write("\n")
+
         with open(settings_file, 'w') as f:
             f.write("SWATH COVERAGE PLOTTER - SETTINGS AND SOURCE FILES\n")
             f.write("=" * 60 + "\n\n")
@@ -3105,16 +3348,19 @@ def save_settings_info(self, save_dir, save_name):
             f.write(f"Cruise: {self.cruise_name}\n")
             f.write(f"Depth Reference: {self.ref_cbox.currentText()}\n\n")
             
-            # Source files
+            # Source files by type
             f.write("SOURCE FILES:\n")
             f.write("-" * 15 + "\n")
-            if hasattr(self, 'file_list') and self.file_list.count() > 0:
-                for i in range(self.file_list.count()):
-                    item = self.file_list.item(i)
-                    f.write(f"{i+1}. {item.text()}\n")
-            else:
-                f.write("No source files loaded\n")
-            f.write("\n")
+            source_files = _collect_analysis_source_files(self)
+            raw_files = source_files.get('raw_files', [])
+            swath_pkl_files = source_files.get('swath_pkl_files', [])
+            archive_pkl_files = source_files.get('archive_pkl_files', [])
+            spec_curve_files = source_files.get('spec_curve_files', [])
+
+            _write_file_section(f, "Raw Files", raw_files)
+            _write_file_section(f, "Swath PKL Files", swath_pkl_files)
+            _write_file_section(f, "Archive PKL Files", archive_pkl_files)
+            _write_file_section(f, "Spec Curve Files", spec_curve_files)
             
             # Filter settings
             f.write("FILTER SETTINGS:\n")
@@ -3170,6 +3416,301 @@ def save_settings_info(self, save_dir, save_name):
         
     except Exception as e:
         update_log(self, f'Error saving settings info: {str(e)}')
+
+
+def _set_combobox_text(combo_widget, value):
+    if value is None:
+        return
+    text_value = str(value)
+    idx = combo_widget.findText(text_value, Qt.MatchFlag.MatchFixedString)
+    if idx >= 0:
+        combo_widget.setCurrentIndex(idx)
+
+
+def _apply_analysis_settings(self, payload):
+    system_info = payload.get('system_information', {})
+    filter_settings = payload.get('filter_settings', {})
+    plot_settings = payload.get('plot_settings', {})
+
+    # System information
+    if hasattr(self, 'model_cbox'):
+        _set_combobox_text(self.model_cbox, system_info.get('model'))
+        self.model_name = self.model_cbox.currentText()
+    if hasattr(self, 'custom_info_gb') and system_info.get('use_custom_system_information') is not None:
+        self.custom_info_gb.setChecked(bool(system_info.get('use_custom_system_information')))
+    if hasattr(self, 'show_model_chk') and system_info.get('show_model_in_title') is not None:
+        self.show_model_chk.setChecked(bool(system_info.get('show_model_in_title')))
+    if hasattr(self, 'show_ship_chk') and system_info.get('show_ship_in_title') is not None:
+        self.show_ship_chk.setChecked(bool(system_info.get('show_ship_in_title')))
+    if hasattr(self, 'show_cruise_chk') and system_info.get('show_cruise_in_title') is not None:
+        self.show_cruise_chk.setChecked(bool(system_info.get('show_cruise_in_title')))
+    if hasattr(self, 'ship_tb') and system_info.get('ship') is not None:
+        self.ship_tb.setText(str(system_info.get('ship')))
+        self.ship_name = self.ship_tb.text()
+    if hasattr(self, 'cruise_tb') and system_info.get('cruise') is not None:
+        self.cruise_tb.setText(str(system_info.get('cruise')))
+        self.cruise_name = self.cruise_tb.text()
+    if hasattr(self, 'ref_cbox'):
+        _set_combobox_text(self.ref_cbox, system_info.get('depth_reference'))
+
+    # Filter settings
+    angle_range = filter_settings.get('angle_range_deg', {})
+    depth_new = filter_settings.get('depth_range_new_m', {})
+    depth_arc = filter_settings.get('depth_range_archive_m', {})
+    width_new = filter_settings.get('width_range_new_m', {})
+    width_arc = filter_settings.get('width_range_archive_m', {})
+    bs_range = filter_settings.get('backscatter_range_db', {})
+    ping_range = filter_settings.get('ping_interval_range_sec', {})
+
+    if hasattr(self, 'angle_gb') and filter_settings.get('angle_filter_enabled') is not None:
+        self.angle_gb.setChecked(bool(filter_settings.get('angle_filter_enabled')))
+    if hasattr(self, 'min_angle_tb') and angle_range.get('min') is not None:
+        self.min_angle_tb.setText(str(angle_range.get('min')))
+    if hasattr(self, 'max_angle_tb') and angle_range.get('max') is not None:
+        self.max_angle_tb.setText(str(angle_range.get('max')))
+    if hasattr(self, 'depth_gb') and filter_settings.get('depth_filter_enabled') is not None:
+        self.depth_gb.setChecked(bool(filter_settings.get('depth_filter_enabled')))
+    if hasattr(self, 'min_depth_tb') and depth_new.get('min') is not None:
+        self.min_depth_tb.setText(str(depth_new.get('min')))
+    if hasattr(self, 'max_depth_tb') and depth_new.get('max') is not None:
+        self.max_depth_tb.setText(str(depth_new.get('max')))
+    if hasattr(self, 'min_depth_arc_tb') and depth_arc.get('min') is not None:
+        self.min_depth_arc_tb.setText(str(depth_arc.get('min')))
+    if hasattr(self, 'max_depth_arc_tb') and depth_arc.get('max') is not None:
+        self.max_depth_arc_tb.setText(str(depth_arc.get('max')))
+    if hasattr(self, 'width_gb') and filter_settings.get('width_filter_enabled') is not None:
+        self.width_gb.setChecked(bool(filter_settings.get('width_filter_enabled')))
+    if hasattr(self, 'min_width_tb') and width_new.get('min') is not None:
+        self.min_width_tb.setText(str(width_new.get('min')))
+    if hasattr(self, 'max_width_tb') and width_new.get('max') is not None:
+        self.max_width_tb.setText(str(width_new.get('max')))
+    if hasattr(self, 'min_width_arc_tb') and width_arc.get('min') is not None:
+        self.min_width_arc_tb.setText(str(width_arc.get('min')))
+    if hasattr(self, 'max_width_arc_tb') and width_arc.get('max') is not None:
+        self.max_width_arc_tb.setText(str(width_arc.get('max')))
+    if hasattr(self, 'bs_gb') and filter_settings.get('backscatter_filter_enabled') is not None:
+        self.bs_gb.setChecked(bool(filter_settings.get('backscatter_filter_enabled')))
+    if hasattr(self, 'min_bs_tb') and bs_range.get('min') is not None:
+        self.min_bs_tb.setText(str(bs_range.get('min')))
+    if hasattr(self, 'max_bs_tb') and bs_range.get('max') is not None:
+        self.max_bs_tb.setText(str(bs_range.get('max')))
+    if hasattr(self, 'ping_int_gb') and filter_settings.get('ping_interval_filter_enabled') is not None:
+        self.ping_int_gb.setChecked(bool(filter_settings.get('ping_interval_filter_enabled')))
+    if hasattr(self, 'min_ping_int_tb') and ping_range.get('min') is not None:
+        self.min_ping_int_tb.setText(str(ping_range.get('min')))
+    if hasattr(self, 'max_ping_int_tb') and ping_range.get('max') is not None:
+        self.max_ping_int_tb.setText(str(ping_range.get('max')))
+    if hasattr(self, 'max_count_tb') and filter_settings.get('max_plotted_points') is not None:
+        self.max_count_tb.setText(str(filter_settings.get('max_plotted_points')))
+    if hasattr(self, 'pt_count_gb') and filter_settings.get('point_count_limit_enabled') is not None:
+        self.pt_count_gb.setChecked(bool(filter_settings.get('point_count_limit_enabled')))
+    if hasattr(self, 'dec_fac_tb') and filter_settings.get('decimation_factor') is not None:
+        self.dec_fac_tb.setText(str(filter_settings.get('decimation_factor')))
+    if hasattr(self, 'rtp_angle_gb') and filter_settings.get('rt_angle_filter_enabled') is not None:
+        self.rtp_angle_gb.setChecked(bool(filter_settings.get('rt_angle_filter_enabled')))
+    if hasattr(self, 'rtp_angle_buffer_tb') and filter_settings.get('rt_angle_buffer_deg') is not None:
+        self.rtp_angle_buffer_tb.setText(str(filter_settings.get('rt_angle_buffer_deg')))
+    if hasattr(self, 'rtp_cov_gb') and filter_settings.get('rt_coverage_filter_enabled') is not None:
+        self.rtp_cov_gb.setChecked(bool(filter_settings.get('rt_coverage_filter_enabled')))
+    if hasattr(self, 'rtp_cov_buffer_tb') and filter_settings.get('rt_coverage_buffer_m') is not None:
+        self.rtp_cov_buffer_tb.setText(str(filter_settings.get('rt_coverage_buffer_m')))
+
+    # Plot settings
+    if hasattr(self, 'pt_size_cbox'):
+        _set_combobox_text(self.pt_size_cbox, plot_settings.get('point_size'))
+    if hasattr(self, 'pt_alpha_cbox'):
+        _set_combobox_text(self.pt_alpha_cbox, str(plot_settings.get('point_opacity_percent')))
+    if hasattr(self, 'angle_lines_gb') and plot_settings.get('show_swath_angle_lines') is not None:
+        self.angle_lines_gb.setChecked(bool(plot_settings.get('show_swath_angle_lines')))
+    if hasattr(self, 'angle_lines_tb_max') and plot_settings.get('swath_angle_lines_max_deg') is not None:
+        self.angle_lines_tb_max.setText(str(plot_settings.get('swath_angle_lines_max_deg')))
+    if hasattr(self, 'angle_lines_tb_int') and plot_settings.get('swath_angle_lines_interval_deg') is not None:
+        self.angle_lines_tb_int.setText(str(plot_settings.get('swath_angle_lines_interval_deg')))
+    if hasattr(self, 'n_wd_lines_gb') and plot_settings.get('show_water_depth_multiple_lines') is not None:
+        self.n_wd_lines_gb.setChecked(bool(plot_settings.get('show_water_depth_multiple_lines')))
+    if hasattr(self, 'n_wd_lines_tb_max') and plot_settings.get('water_depth_multiple_lines_max') is not None:
+        self.n_wd_lines_tb_max.setText(str(plot_settings.get('water_depth_multiple_lines_max')))
+    if hasattr(self, 'n_wd_lines_tb_int') and plot_settings.get('water_depth_multiple_lines_interval') is not None:
+        self.n_wd_lines_tb_int.setText(str(plot_settings.get('water_depth_multiple_lines_interval')))
+    fixed_color_limits = plot_settings.get('fixed_color_limits', {})
+    if hasattr(self, 'min_clim_tb') and fixed_color_limits.get('min') is not None:
+        self.min_clim_tb.setText(str(fixed_color_limits.get('min')))
+    if hasattr(self, 'max_clim_tb') and fixed_color_limits.get('max') is not None:
+        self.max_clim_tb.setText(str(fixed_color_limits.get('max')))
+    if hasattr(self, 'clim_last_user') and fixed_color_limits.get('min') is not None and fixed_color_limits.get('max') is not None:
+        try:
+            self.clim_last_user['depth'] = [float(fixed_color_limits.get('min')), float(fixed_color_limits.get('max'))]
+        except (TypeError, ValueError):
+            pass
+    if hasattr(self, 'clim_filter_chk') and plot_settings.get('set_color_scale_from_filters') is not None:
+        self.clim_filter_chk.setChecked(bool(plot_settings.get('set_color_scale_from_filters')))
+    if hasattr(self, 'grid_lines_toggle_chk') and plot_settings.get('show_grid_lines') is not None:
+        self.grid_lines_toggle_chk.setChecked(bool(plot_settings.get('show_grid_lines')))
+    if hasattr(self, 'colorbar_chk') and plot_settings.get('show_colorbar_legend') is not None:
+        self.colorbar_chk.setChecked(bool(plot_settings.get('show_colorbar_legend')))
+    if hasattr(self, 'show_hist_chk') and plot_settings.get('show_histogram') is not None:
+        self.show_hist_chk.setChecked(bool(plot_settings.get('show_histogram')))
+    if hasattr(self, 'show_coverage_trend_chk') and plot_settings.get('show_coverage_trend') is not None:
+        self.show_coverage_trend_chk.setChecked(bool(plot_settings.get('show_coverage_trend')))
+    if hasattr(self, 'show_ref_fil_chk') and plot_settings.get('show_reference_filter_text') is not None:
+        self.show_ref_fil_chk.setChecked(bool(plot_settings.get('show_reference_filter_text')))
+    if hasattr(self, 'spec_chk') and plot_settings.get('show_specification_lines') is not None:
+        self.spec_chk.setChecked(bool(plot_settings.get('show_specification_lines')))
+    if hasattr(self, 'show_spec_legend_chk') and plot_settings.get('show_spec_legend') is not None:
+        self.show_spec_legend_chk.setChecked(bool(plot_settings.get('show_spec_legend')))
+    if hasattr(self, 'match_data_cmodes_chk') and plot_settings.get('apply_color_modes_to_data_plots') is not None:
+        self.match_data_cmodes_chk.setChecked(bool(plot_settings.get('apply_color_modes_to_data_plots')))
+    if hasattr(self, 'show_data_chk') and plot_settings.get('show_swath_data') is not None:
+        self.show_data_chk.setChecked(bool(plot_settings.get('show_swath_data')))
+    if hasattr(self, 'show_data_chk_arc') and plot_settings.get('show_archive_data') is not None:
+        self.show_data_chk_arc.setChecked(bool(plot_settings.get('show_archive_data')))
+    if hasattr(self, 'top_data_cbox'):
+        _set_combobox_text(self.top_data_cbox, plot_settings.get('top_data'))
+    if hasattr(self, 'clim_cbox'):
+        _set_combobox_text(self.clim_cbox, plot_settings.get('color_scale'))
+
+    new_mode = plot_settings.get('new_data_color_mode')
+    if new_mode == 'by_type' and hasattr(self, 'new_data_color_by_type_radio'):
+        self.new_data_color_by_type_radio.setChecked(True)
+    elif new_mode == 'single_color' and hasattr(self, 'new_data_single_color_radio'):
+        self.new_data_single_color_radio.setChecked(True)
+
+    archive_mode = plot_settings.get('archive_data_color_mode')
+    if archive_mode == 'by_type' and hasattr(self, 'archive_data_color_by_type_radio'):
+        self.archive_data_color_by_type_radio.setChecked(True)
+    elif archive_mode == 'single_color' and hasattr(self, 'archive_data_single_color_radio'):
+        self.archive_data_single_color_radio.setChecked(True)
+
+    new_single_color = plot_settings.get('new_data_single_color')
+    if new_single_color is not None and hasattr(self, 'color'):
+        try:
+            q_color = QtGui.QColor(str(new_single_color))
+            if q_color.isValid():
+                self.color = q_color
+        except Exception:
+            pass
+
+    archive_single_color = plot_settings.get('archive_data_single_color')
+    if archive_single_color is not None and hasattr(self, 'color_arc'):
+        try:
+            q_color = QtGui.QColor(str(archive_single_color))
+            if q_color.isValid():
+                self.color_arc = q_color
+        except Exception:
+            pass
+
+    custom_limits = plot_settings.get('custom_plot_limits', {})
+    if hasattr(self, 'plot_lim_gb') and custom_limits.get('enabled') is not None:
+        self.plot_lim_gb.setChecked(bool(custom_limits.get('enabled')))
+    if hasattr(self, 'min_z_tb') and custom_limits.get('min_depth_m') is not None:
+        self.min_z_tb.setText(str(custom_limits.get('min_depth_m')))
+    if hasattr(self, 'max_z_tb') and custom_limits.get('max_depth_m') is not None:
+        self.max_z_tb.setText(str(custom_limits.get('max_depth_m')))
+    if hasattr(self, 'max_x_tb') and custom_limits.get('max_width_m') is not None:
+        self.max_x_tb.setText(str(custom_limits.get('max_width_m')))
+    if hasattr(self, 'max_dr_tb') and custom_limits.get('max_data_rate') is not None:
+        self.max_dr_tb.setText(str(custom_limits.get('max_data_rate')))
+    if hasattr(self, 'max_pi_tb') and custom_limits.get('max_ping_interval') is not None:
+        self.max_pi_tb.setText(str(custom_limits.get('max_ping_interval')))
+
+    # Preserve imported custom limits during the first refresh after import.
+    # refresh_plot has one-shot depth/width filter sync behavior that can copy
+    # filter values into custom limits; when importing an analysis group, the
+    # saved custom limits should take precedence for reproducing the final plot.
+    imported_custom_enabled = bool(custom_limits.get('enabled'))
+    has_imported_depth_custom = (custom_limits.get('min_depth_m') is not None) or (custom_limits.get('max_depth_m') is not None)
+    has_imported_width_custom = custom_limits.get('max_width_m') is not None
+    if imported_custom_enabled and has_imported_depth_custom:
+        self._depth_limits_synced = True
+    if imported_custom_enabled and has_imported_width_custom:
+        self._width_limits_synced = True
+
+
+def import_analysis_group(self):
+    json_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+        self,
+        'Import Analysis Group JSON',
+        getattr(self, 'plot_save_dir', os.getcwd()),
+        'JSON files (*.json)'
+    )
+    if not json_path:
+        update_log(self, 'Analysis group import cancelled.')
+        return
+
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+    except Exception as e:
+        QtWidgets.QMessageBox.warning(self, 'Import Failed', f'Could not read JSON file:\n{str(e)}')
+        return
+
+    if not isinstance(payload, dict) or 'source_files' not in payload:
+        QtWidgets.QMessageBox.warning(self, 'Invalid File', 'Selected JSON is not a valid analysis group export.')
+        return
+
+    reply = QtWidgets.QMessageBox.question(
+        self,
+        'Replace Current Analysis?',
+        'Importing will clear currently loaded sources before loading the analysis group.\n\nContinue?',
+        QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+        QtWidgets.QMessageBox.StandardButton.No
+    )
+    if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+        update_log(self, 'Analysis group import cancelled by user.')
+        return
+
+    # Clear existing loaded sources
+    remove_cov_files(self, clear_all=True)
+    if hasattr(self, 'clear_all_swath_pkl_files'):
+        self.clear_all_swath_pkl_files()
+    if hasattr(self, 'clear_all_archive_files'):
+        self.clear_all_archive_files()
+    if hasattr(self, 'spec_file_list'):
+        self.spec_file_list.clear()
+    if hasattr(self, 'spec'):
+        self.spec = {}
+    if hasattr(self, 'spec_colors'):
+        self.spec_colors = {}
+    if hasattr(self, 'spec_source_paths'):
+        self.spec_source_paths = {}
+
+    _apply_analysis_settings(self, payload)
+
+    source_files = payload.get('source_files', {})
+
+    def _existing_paths(paths, label):
+        existing = []
+        missing = []
+        for p in paths:
+            if p and os.path.exists(p):
+                existing.append(p)
+            elif p:
+                missing.append(p)
+        if missing:
+            update_log(self, f'{label}: skipped {len(missing)} missing file(s)')
+            for missing_path in missing:
+                update_log(self, f'  Missing: {missing_path}')
+        return existing
+
+    raw_files = _existing_paths(source_files.get('raw_files', []), 'Raw files')
+    swath_pkl_files = _existing_paths(source_files.get('swath_pkl_files', []), 'Swath PKL files')
+    archive_pkl_files = _existing_paths(source_files.get('archive_pkl_files', []), 'Archive PKL files')
+    spec_curve_files = _existing_paths(source_files.get('spec_curve_files', []), 'Spec curve files')
+
+    if raw_files:
+        update_file_list(self, raw_files, verbose=True)
+    if swath_pkl_files and hasattr(self, '_process_pkl_files_directly'):
+        self._process_pkl_files_directly(swath_pkl_files)
+    if archive_pkl_files:
+        load_archive_files(self, archive_pkl_files)
+    if spec_curve_files:
+        load_spec_files(self, spec_curve_files)
+
+    # Match manual file-add behavior: refresh button enable/highlight states after import.
+    update_button_states(self)
+
+    refresh_plot(self, call_source='import_analysis_group')
+    update_log(self, f'Imported analysis group from {os.path.basename(json_path)}')
 
 
 def clear_plot(self):
@@ -3408,29 +3949,11 @@ def convert_swath_pkl_to_archive(self):
     config["last_archive_save_dir"] = parent_dir
     save_session_config(config)
 
-def load_archive(self):
-    from PyQt6.QtWidgets import QFileDialog
+def load_archive_files(self, archive_files):
     import os
     import pickle
     import gzip
 
-    # Load last used archive directory from session config
-    config = load_session_config()
-    default_dir = config.get('last_archive_dir', os.getcwd())
-
-    # Open file dialog for archive PKL files
-    file_dialog = QFileDialog()
-    file_dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
-    file_dialog.setNameFilter("Pickle files (*.pkl)")
-    file_dialog.setDirectory(default_dir)
-    if file_dialog.exec() == QFileDialog.DialogCode.Accepted:
-        archive_files = file_dialog.selectedFiles()
-        # Save the directory for next session
-        if archive_files:
-            update_last_directory('last_archive_dir', os.path.dirname(archive_files[0]))
-    else:
-        archive_files = []
-        
     # Only load files not already in archive_filenames
     new_archive_files = [f for f in archive_files if f not in self.archive_filenames]
 
@@ -3475,6 +3998,29 @@ def load_archive(self):
         print('show_data_chk_arc is now', self.show_data_chk_arc.isChecked())
     else:
         refresh_plot(self)
+
+
+def load_archive(self):
+    from PyQt6.QtWidgets import QFileDialog
+    import os
+
+    # Load last used archive directory from session config
+    config = load_session_config()
+    default_dir = config.get('last_archive_dir', os.getcwd())
+
+    # Open file dialog for archive PKL files
+    file_dialog = QFileDialog()
+    file_dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+    file_dialog.setNameFilter("Pickle files (*.pkl)")
+    file_dialog.setDirectory(default_dir)
+    if file_dialog.exec() == QFileDialog.DialogCode.Accepted:
+        archive_files = file_dialog.selectedFiles()
+        # Save the directory for next session
+        if archive_files:
+            update_last_directory('last_archive_dir', os.path.dirname(archive_files[0]))
+    else:
+        archive_files = []
+    load_archive_files(self, archive_files)
 
 
 def show_archive(self):
@@ -3553,36 +4099,15 @@ def show_archive(self):
     return n_plotted
 
 
-def load_spec(self):
-    # load a text file with theoretical performance to be plotted as a line
-    # Use custom file dialog for spec curves instead of main file list
-    from PyQt6.QtWidgets import QFileDialog
-    import os
-    
-    # Load last used spec directory
-    config = load_session_config()
-    default_dir = config.get('last_spec_dir', os.getcwd())
-    
-    # Open file dialog for spec curve files
-    file_dialog = QFileDialog()
-    file_dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
-    file_dialog.setNameFilter("Specification curve files (*.txt)")
-    file_dialog.setDirectory(default_dir)
-    
-    if file_dialog.exec() == QFileDialog.DialogCode.Accepted:
-        fnames_new_spec = file_dialog.selectedFiles()
-        # Update last used directory
-        if fnames_new_spec:
-            update_last_directory("last_spec_dir", os.path.dirname(fnames_new_spec[0]))
-        # Debug: Log selected files
-        if hasattr(self, 'update_log'):
-            self.update_log(f"Selected {len(fnames_new_spec)} spec curve files")
-    else:
-        return  # User cancelled
-    
+def load_spec_files(self, fnames_new_spec):
+    if not fnames_new_spec:
+        return
+
     # Initialize spec dictionary if it doesn't exist
     if not hasattr(self, 'spec'):
         self.spec = {}
+    if not hasattr(self, 'spec_source_paths'):
+        self.spec_source_paths = {}
     
     # Initialize spec_colors dictionary if it doesn't exist
     if not hasattr(self, 'spec_colors'):
@@ -3629,15 +4154,47 @@ def load_spec(self):
                 
                 if not already_exists:
                     self.spec_file_list.addItem(fname_str)
+                    self.spec_source_paths[fname_str] = fnames_new_spec[i]
                     # Debug: Log file addition
                     if hasattr(self, 'update_log'):
                         self.update_log(f"Added {fname_str} to Specification Curves list")
                 else:
+                    self.spec_source_paths[fname_str] = fnames_new_spec[i]
                     if hasattr(self, 'update_log'):
                         self.update_log(f"Specification curve {fname_str} already loaded")
 
     self.spec_chk.setChecked(True)
     refresh_plot(self, call_source='load_spec')
+
+
+def load_spec(self):
+    # load a text file with theoretical performance to be plotted as a line
+    # Use custom file dialog for spec curves instead of main file list
+    from PyQt6.QtWidgets import QFileDialog
+    import os
+    
+    # Load last used spec directory
+    config = load_session_config()
+    default_dir = config.get('last_spec_dir', os.getcwd())
+    
+    # Open file dialog for spec curve files
+    file_dialog = QFileDialog()
+    file_dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+    file_dialog.setNameFilter("Specification curve files (*.txt)")
+    file_dialog.setDirectory(default_dir)
+    
+    if file_dialog.exec() == QFileDialog.DialogCode.Accepted:
+        fnames_new_spec = file_dialog.selectedFiles()
+        # Update last used directory
+        if fnames_new_spec:
+            update_last_directory("last_spec_dir", os.path.dirname(fnames_new_spec[0]))
+        # Debug: Log selected files
+        if hasattr(self, 'update_log'):
+            self.update_log(f"Selected {len(fnames_new_spec)} spec curve files")
+    else:
+        return  # User cancelled
+
+    load_spec_files(self, fnames_new_spec)
 
 
 def add_spec_lines(self):
@@ -3695,6 +4252,23 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
         print('returning from data rate plotter because the toggle for this data type is unchecked')
         return
 
+    # In PKL-only sessions, do not plot left data-rate points; show notice instead.
+    skip_left_data_rate_plot = False
+    try:
+        raw_files_loaded = any(
+            isinstance(fname, str) and fname.lower().endswith(('.all', '.kmall'))
+            for fname in getattr(self, 'filenames', [])
+        )
+        swath_pkl_loaded = any(
+            isinstance(fname, str) and fname.lower().endswith('.pkl')
+            for fname in getattr(self, 'filenames', [])
+        ) or (hasattr(self, 'swath_pkl_file_list') and self.swath_pkl_file_list.count() > 0)
+        archive_pkl_loaded = len(getattr(self, 'archive_filenames', [])) > 0 or bool(getattr(self, 'det_archive', {}))
+        if (not raw_files_loaded) and (swath_pkl_loaded or archive_pkl_loaded):
+            skip_left_data_rate_plot = True
+    except Exception:
+        pass
+
     c_all = deepcopy([self.c_all_data_rate, self.c_all_data_rate_arc][is_archive])
     # Debug print removed
 
@@ -3711,8 +4285,63 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
 
     z_mean = np.mean([np.asarray(det['z_port']), np.asarray(det['z_stbd'])], axis=0)  # this might not be used in final
 
-    # get scale factor for wcd file sizes (first half of sou
+    # Backward compatibility for older archives that may not include fsize/fsize_wc.
+    # Normalize both series so downstream calculations do not fail on missing keys.
+    sample_count = len(det.get('fname', det.get('date', [])))
+    if sample_count == 0:
+        sample_count = len(det.get('z_port', []))
+
+    def _normalize_size_series(series_key, fallback_values=None):
+        series = det.get(series_key, [])
+        if isinstance(series, np.ndarray):
+            series = series.tolist()
+        elif not isinstance(series, list):
+            series = []
+        if len(series) != sample_count:
+            series = []
+
+        if not series and fallback_values is not None:
+            series = list(fallback_values)
+
+        if not series:
+            # Use a safe non-zero default to avoid divide-by-zero downstream.
+            series = [1.0] * sample_count
+        return series
+
+    bytes_values_for_fallback = det.get('bytes', [])
+    if isinstance(bytes_values_for_fallback, np.ndarray):
+        bytes_values_for_fallback = bytes_values_for_fallback.tolist()
+    if not isinstance(bytes_values_for_fallback, list) or len(bytes_values_for_fallback) != sample_count:
+        bytes_values_for_fallback = None
+
+    det['fsize'] = _normalize_size_series('fsize', fallback_values=bytes_values_for_fallback)
+    # Keep water-column size unknown unless explicitly present in the dataset.
+    # Falling back to fsize here can artificially inflate "total" data-rate curves.
+    fsize_wc_series = det.get('fsize_wc', [])
+    if isinstance(fsize_wc_series, np.ndarray):
+        fsize_wc_series = fsize_wc_series.tolist()
+    if not isinstance(fsize_wc_series, list) or len(fsize_wc_series) != sample_count:
+        fsize_wc_series = [np.nan] * sample_count
+    det['fsize_wc'] = fsize_wc_series
+
+    # get scale factor for water column file sizes
     wcd_fac = np.divide(np.asarray(det['fsize_wc']), np.asarray(det['fsize']))  #[0:idx_split]
+    # If WC ratio is constant/invalid, treat WC scaling as unavailable to avoid
+    # artificially lifting the "total" data-rate curve.
+    try:
+        wcd_fac_arr = np.asarray(wcd_fac, dtype=float)
+        finite_mask = np.isfinite(wcd_fac_arr)
+        if np.any(finite_mask):
+            finite_vals = wcd_fac_arr[finite_mask]
+            if (len(finite_vals) < 5) or np.isclose(np.nanstd(finite_vals), 0.0, atol=1e-6):
+                wcd_fac = np.zeros_like(wcd_fac_arr)
+                update_log(self, f'Info: WC scaling unavailable for {det_name}; using swath-only data rate')
+            else:
+                wcd_fac = wcd_fac_arr
+        else:
+            wcd_fac = np.zeros_like(wcd_fac_arr)
+    except Exception:
+        pass
     # print('got wcd_dr_scale with len =', len(wcd_fac), ' = ', wcd_fac)
 
     # get the datetime for each ping (different formats for older archives)
@@ -3749,58 +4378,67 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
     # check whether detection dict has the byte field to calculate data rate (older archives may not)
     print('det.keys =', det.keys())
     print('*** VERSION CHECK: This is the NEW version with enhanced fallback logic ***')
+    bytes_source = 'unknown'
     if 'bytes' in det.keys():
-        # DEBUG: in plot_data_rate, found bytes field with len= len(det['bytes']) in det_name
-                # DEBUG: First 10 bytes values and check if all are 0
-        # Check if bytes field contains valid data (not all zeros)
         bytes_values = [det['bytes'][i] for i in sort_idx]
         if all([b == 0 for b in bytes_values]):
             # interim .kmall format logging 0 for bytes field; try alternative fields
             if 'fsize_wc' in det.keys():
-                # DEBUG: Using fsize_wc field instead of bytes field for data rate calculation
                 fsize_wc_values = [det['fsize_wc'][i] for i in sort_idx]
-                # DEBUG: fsize_wc_values[:10] = fsize_wc_values[:10]
-                # DEBUG: len(set(fsize_wc_values)) = len(set(fsize_wc_values))
-                # Check if fsize_wc has varying values
                 if len(set(fsize_wc_values)) > 1:
-                    # DEBUG: fsize_wc has varying values, using it
                     bytes_sorted = fsize_wc_values
+                    bytes_source = 'fsize_wc'
                 else:
-                    # DEBUG: fsize_wc also contains constant values, trying fsize
                     if 'fsize' in det.keys():
                         fsize_values = [det['fsize'][i] for i in sort_idx]
-                        # DEBUG: fsize_values[:10] = fsize_values[:10]
-                        # DEBUG: len(set(fsize_values)) = len(set(fsize_values))
                         if len(set(fsize_values)) > 1:
-                            # DEBUG: Using fsize field for data rate calculation
                             bytes_sorted = fsize_values
+                            bytes_source = 'fsize'
                         else:
-                            # DEBUG: fsize also contains constant values, using estimated bytes based on ping count
-                            # Use estimated bytes based on ping count and typical data size
-                            bytes_sorted = [1000000 + i * 1000 for i in range(len(sort_idx))]  # Varying estimated bytes
+                            bytes_sorted = (np.nan * np.ones(len(sort_idx))).tolist()
+                            bytes_source = 'unavailable'
+                            update_log(self, f'Warning: {det_name} has zero byte deltas and constant file size; data rate is unavailable')
                     else:
-                        # DEBUG: No fsize field available, using estimated bytes
-                        bytes_sorted = [1000000 + i * 1000 for i in range(len(sort_idx))]  # Varying estimated bytes
+                        bytes_sorted = (np.nan * np.ones(len(sort_idx))).tolist()
+                        bytes_source = 'unavailable'
+                        update_log(self, f'Warning: {det_name} has zero byte deltas and no size fallback; data rate is unavailable')
             elif 'fsize' in det.keys():
-                # DEBUG: Using fsize field instead of bytes field for data rate calculation
                 fsize_values = [det['fsize'][i] for i in sort_idx]
                 if len(set(fsize_values)) > 1:
                     bytes_sorted = fsize_values
+                    bytes_source = 'fsize'
                 else:
-                    # DEBUG: fsize contains constant values, using estimated bytes
-                    bytes_sorted = [1000000 + i * 1000 for i in range(len(sort_idx))]  # Varying estimated bytes
+                    bytes_sorted = (np.nan * np.ones(len(sort_idx))).tolist()
+                    bytes_source = 'unavailable'
+                    update_log(self, f'Warning: {det_name} has constant file size; data rate is unavailable')
             else:
-                # No alternative field available; use estimated bytes
-                # DEBUG: No alternative fields available, using estimated bytes
-                bytes_sorted = [1000000 + i * 1000 for i in range(len(sort_idx))]  # Varying estimated bytes
+                bytes_sorted = (np.nan * np.ones(len(sort_idx))).tolist()
+                bytes_source = 'unavailable'
+                update_log(self, f'Warning: {det_name} has no byte-size information; data rate is unavailable')
         else:
             bytes_sorted = bytes_values
+            bytes_source = 'bytes'
 
     else:  # bytes field not available; make a nan list for plotting
         # DEBUG: in plot_data_rate, did not find bytes field in det_name
         bytes_sorted = (np.nan*np.ones(len(det['fname']))).tolist()
+        bytes_source = 'unavailable'
         update_log(self, 'Warning: ' + det_name + ' does not included bytes between ping datagrams (e.g., possibly an '
                                                   'old archive format); data rate will not be plotted')
+
+    try:
+        bs_arr = np.asarray(bytes_sorted, dtype=float)
+        valid_count = int(np.sum(~np.isnan(bs_arr)))
+        nonzero_count = int(np.sum((~np.isnan(bs_arr)) & (bs_arr != 0)))
+        nan_count = int(np.sum(np.isnan(bs_arr)))
+        sample_vals = [f"{v:.0f}" if not np.isnan(v) else 'nan' for v in bs_arr[:5]]
+        update_log(
+            self,
+            f'Data-rate bytes source ({det_name}): {bytes_source}; valid={valid_count}/{len(bs_arr)}, '
+            f'nonzero={nonzero_count}, nan={nan_count}, sample=[{", ".join(sample_vals)}]'
+        )
+    except Exception:
+        pass
 
     # DEBUG: Print first 10 values
     # DEBUG: First 10 bytes_sorted: bytes_sorted[:10]
@@ -3861,6 +4499,23 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
     # DEBUG: ratio[:10]= ratio[:10]
 
     idx_swath_2 = np.append(False, np.less(ratio, 0.1)).astype(int)
+
+    # Additional PKL-oriented swath-2 detection:
+    # mark the second entry in adjacent duplicate byte pairs (a,a) as swath-2.
+    try:
+        bytes_for_swath_detect = np.asarray(bytes_sorted, dtype=float)
+        dup_swath2 = np.zeros(len(bytes_for_swath_detect), dtype=int)
+        for i in range(1, len(bytes_for_swath_detect)):
+            b_prev = bytes_for_swath_detect[i - 1]
+            b_curr = bytes_for_swath_detect[i]
+            if np.isfinite(b_prev) and np.isfinite(b_curr) and b_prev > 0 and b_curr > 0:
+                if np.isclose(b_prev, b_curr, rtol=0.01, atol=1.0):
+                    dup_swath2[i] = 1
+        # Merge with time-ratio detector so either signal can classify swath-2.
+        idx_swath_2 = np.maximum(idx_swath_2, dup_swath2)
+    except Exception:
+        pass
+
     idx_swath_1 = np.logical_not(idx_swath_2).astype(int)
     # print('idx_swath_1 =', idx_swath_1)
     # print('idx_swath_2 =', idx_swath_2)
@@ -3868,16 +4523,77 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
     # print('dt_s_final =', dt_s_final)
 
     # step 2: add all bytes since last first swath (i.e., ping cycle data sum, regardless of single or dual swath)
-    swath_2_bytes = np.multiply(np.asarray(bytes_sorted), idx_swath_2)  # array of bytes from swath 2 only
-    ping_int_bytes = np.add(np.multiply(np.asarray(bytes_sorted), idx_swath_1), np.append(swath_2_bytes[1:], 0))
+    bytes_arr = np.asarray(bytes_sorted, dtype=float)
 
-    # step 3: add all time since last first swath (i.e., ping interval, regardless of single or dual swath)
-    swath_2_time = np.multiply(dt_s_final, idx_swath_2)  # array of dt sec from swath 2 only
-    ping_int_time = np.add(np.multiply(dt_s_final, idx_swath_1), np.append(swath_2_time[1:], 0))
+    # Some Swath PKL streams carry paired duplicate byte deltas (swath1 ~= swath2),
+    # while raw processing effectively reflects ping-cycle deltas. Detect and suppress
+    # duplicate swath-2 contribution to keep PKL and raw rates consistent.
+    try:
+        sw1_idx = np.where(idx_swath_1 == 1)[0]
+        dup_matches = 0
+        dup_total = 0
+        for i in sw1_idx:
+            j = i + 1
+            if j < len(bytes_arr) and idx_swath_2[j] == 1:
+                b1 = bytes_arr[i]
+                b2 = bytes_arr[j]
+                if np.isfinite(b1) and np.isfinite(b2) and b1 > 0 and b2 > 0:
+                    dup_total += 1
+                    if np.isclose(b1, b2, rtol=0.01, atol=1.0):
+                        dup_matches += 1
+        dup_ratio = (dup_matches / dup_total) if dup_total > 0 else 0.0
+    except Exception:
+        dup_ratio = 0.0
 
-    # step 4: get data rate between pings
-    # Fix divide by zero error in data rate calculation
-    ping_int_dr = np.divide(ping_int_bytes, ping_int_time, out=np.full_like(ping_int_bytes, np.nan, dtype=np.float64), where=ping_int_time != 0)*3600/1000000
+    suppress_swath2_bytes = dup_ratio >= 0.5
+    if suppress_swath2_bytes:
+        update_log(self, f'Info: suppressing duplicate swath-2 byte deltas for {det_name} (pair-dup ratio={dup_ratio:.2f})')
+        # For strongly duplicated pair streams, collapse to one sample per pair (0,2,4,...).
+        keep_idx = np.arange(0, len(bytes_arr), 2, dtype=int)
+        if len(keep_idx) >= 3:
+            # Collapse duplicate swath pairs into one ping-cycle series for rate calculations.
+            time_sorted = [time_sorted[i] for i in keep_idx]
+            z_mean_sorted = [z_mean_sorted[i] for i in keep_idx]
+            c_mean_sorted = [c_mean_sorted[i] for i in keep_idx]
+            fnames_sorted = [fnames_sorted[i] for i in keep_idx]
+            wcd_fac_sorted = [wcd_fac_sorted[i] for i in keep_idx]
+            bytes_arr = bytes_arr[keep_idx]
+
+            dt_s = np.asarray([np.nan] + [(time_sorted[i] - time_sorted[i - 1]).total_seconds()
+                                          for i in range(1, len(time_sorted))], dtype=float)
+            dt_s_final = deepcopy(dt_s)
+            ping_int_bytes = bytes_arr
+            ping_int_time = dt_s_final
+            ping_int_dr = np.divide(
+                ping_int_bytes, ping_int_time,
+                out=np.full_like(ping_int_bytes, np.nan, dtype=np.float64),
+                where=ping_int_time != 0
+            ) * 3600 / 1000000
+        else:
+            swath_2_bytes = np.zeros_like(bytes_arr)
+            ping_int_bytes = np.add(np.multiply(np.asarray(bytes_sorted), idx_swath_1), np.append(swath_2_bytes[1:], 0))
+            swath_2_time = np.multiply(dt_s_final, idx_swath_2)
+            ping_int_time = np.add(np.multiply(dt_s_final, idx_swath_1), np.append(swath_2_time[1:], 0))
+            ping_int_dr = np.divide(
+                ping_int_bytes, ping_int_time,
+                out=np.full_like(ping_int_bytes, np.nan, dtype=np.float64),
+                where=ping_int_time != 0
+            ) * 3600 / 1000000
+    else:
+        swath_2_bytes = np.multiply(bytes_arr, idx_swath_2)  # array of bytes from swath 2 only
+        ping_int_bytes = np.add(np.multiply(np.asarray(bytes_sorted), idx_swath_1), np.append(swath_2_bytes[1:], 0))
+
+        # step 3: add all time since last first swath (i.e., ping interval, regardless of single or dual swath)
+        swath_2_time = np.multiply(dt_s_final, idx_swath_2)  # array of dt sec from swath 2 only
+        ping_int_time = np.add(np.multiply(dt_s_final, idx_swath_1), np.append(swath_2_time[1:], 0))
+
+        # step 4: get data rate between pings
+        # Fix divide by zero error in data rate calculation
+        ping_int_dr = np.divide(
+            ping_int_bytes, ping_int_time,
+            out=np.full_like(ping_int_bytes, np.nan, dtype=np.float64),
+            where=ping_int_time != 0
+        ) * 3600 / 1000000
 
     # DEBUG: Print first 10 values
     # DEBUG: First 10 ping_int_bytes: ping_int_bytes[:10]
@@ -4012,7 +4728,7 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
     c_mean_sorted_dt_valid = c_mean_sorted_arr[valid_mask_dt] if hasattr(c_mean_sorted_arr, '__len__') else c_mean_sorted_arr
     
     # Additional validation: ensure we have valid data to plot
-    if len(dr_smoothed_valid) == 0:
+    if not skip_left_data_rate_plot and len(dr_smoothed_valid) == 0:
         # DEBUG: No valid data rate values after filtering
         update_log(self, 'Warning: No valid data rate values to plot')
         return
@@ -4033,17 +4749,18 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
     try:
         if self.match_data_cmodes_chk.isChecked() and self.last_cmode != 'solid_color':
 
-            self.h_data_rate_smoothed = self.data_rate_ax1.scatter(dr_smoothed_valid, z_mean_sorted_valid,
-                                                                   s=self.pt_size, c=c_mean_sorted_valid, marker='o',
-                                                                   label=local_label,
-                                                                   vmin=self.clim[0], vmax=self.clim[1], cmap=self.cmap,
-                                                                   alpha=self.pt_alpha, linewidths=0)
+            if not skip_left_data_rate_plot:
+                self.h_data_rate_smoothed = self.data_rate_ax1.scatter(dr_smoothed_valid, z_mean_sorted_valid,
+                                                                       s=self.pt_size, c=c_mean_sorted_valid, marker='o',
+                                                                       label=local_label,
+                                                                       vmin=self.clim[0], vmax=self.clim[1], cmap=self.cmap,
+                                                                       alpha=self.pt_alpha, linewidths=0)
 
-            self.h_data_rate_smoothed_total = self.data_rate_ax1.scatter(dr_smoothed_total_valid, z_mean_sorted_total_valid,
-                                                                         s=self.pt_size, c=c_mean_sorted_total_valid, marker='+',
-                                                                         label=local_label,
-                                                                         vmin=self.clim[0], vmax=self.clim[1], cmap=self.cmap,
-                                                                         alpha=self.pt_alpha, linewidths=0)
+                self.h_data_rate_smoothed_total = self.data_rate_ax1.scatter(dr_smoothed_total_valid, z_mean_sorted_total_valid,
+                                                                             s=self.pt_size, c=c_mean_sorted_total_valid, marker='+',
+                                                                             label=local_label,
+                                                                             vmin=self.clim[0], vmax=self.clim[1], cmap=self.cmap,
+                                                                             alpha=self.pt_alpha, linewidths=0)
 
             self.h_ping_interval = self.data_rate_ax2.scatter(dt_final_valid, z_mean_sorted_dt_valid,
                                                               s=self.pt_size, c=c_mean_sorted_dt_valid, marker='o',
@@ -4066,22 +4783,24 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
                 c_mean_sorted_total_valid = np.tile(np.asarray(colors.hex2color(self.color.name())), (len(z_mean_sorted_total_valid), 1))
                 c_mean_sorted_dt_valid = np.tile(np.asarray(colors.hex2color(self.color.name())), (len(z_mean_sorted_dt_valid), 1))
 
-            self.h_data_rate_smoothed = self.data_rate_ax1.scatter(dr_smoothed_valid, z_mean_sorted_valid,
-                                                                   s=self.pt_size, c=c_mean_sorted_valid,
-                                                                   label=local_label, marker='o',
-                                                                   alpha=self.pt_alpha, linewidths=0)
+            if not skip_left_data_rate_plot:
+                self.h_data_rate_smoothed = self.data_rate_ax1.scatter(dr_smoothed_valid, z_mean_sorted_valid,
+                                                                       s=self.pt_size, c=c_mean_sorted_valid,
+                                                                       label=local_label, marker='o',
+                                                                       alpha=self.pt_alpha, linewidths=0)
 
-            self.h_data_rate_smoothed_total = self.data_rate_ax1.scatter(dr_smoothed_total_valid, z_mean_sorted_total_valid,
-                                                                         s=self.pt_size, c=c_mean_sorted_total_valid,
-                                                                         label=local_label, marker='+',
-                                                                         alpha=self.pt_alpha, linewidths=0)
+                self.h_data_rate_smoothed_total = self.data_rate_ax1.scatter(dr_smoothed_total_valid, z_mean_sorted_total_valid,
+                                                                             s=self.pt_size, c=c_mean_sorted_total_valid,
+                                                                             label=local_label, marker='+',
+                                                                             alpha=self.pt_alpha, linewidths=0)
 
             self.h_ping_interval = self.data_rate_ax2.scatter(dt_final_valid, z_mean_sorted_dt_valid,
                                                               s=self.pt_size, c=c_mean_sorted_dt_valid,
                                                               label=local_label,
                                                               marker='o', alpha=self.pt_alpha, linewidths=0)
 
-            self.legend_handles_data_rate.append(self.h_data_rate_smoothed)  # append handles for legend with 'New data' or 'Archive data'
+            if not skip_left_data_rate_plot:
+                self.legend_handles_data_rate.append(self.h_data_rate_smoothed)  # append handles for legend with 'New data' or 'Archive data'
             # self.legend_handles_data_rate.append(self.h_data_rate_smoothed)  # append handles for legend with 'New data' or 'Archive data'
             
         # DEBUG: Successfully plotted data rate
@@ -6496,7 +7215,9 @@ def convert_files_to_pickle(self):
                 if 'fsize' not in data:
                     data['fsize'] = os.path.getsize(source_file)
                 if 'fsize_wc' not in data:
-                    data['fsize_wc'] = data.get('fsize', os.path.getsize(source_file))
+                    # Match raw parsing behavior: if no explicit water-column size exists, keep NaN
+                    # so "total" data-rate is not artificially inflated.
+                    data['fsize_wc'] = np.nan
                 
                 # Recalculate bytes_from_last_ping field using start_byte if available
                 if 'XYZ' in data and 'start_byte' in data:
@@ -6514,9 +7235,16 @@ def convert_files_to_pickle(self):
                     data['bytes'] = bytes_list
                 elif 'XYZ' in data:
                     # Fallback: ensure bytes_from_last_ping field is present
+                    bytes_list = []
                     for p in range(len(data['XYZ'])):
                         if 'bytes_from_last_ping' not in data['XYZ'][p]:
                             data['XYZ'][p]['bytes_from_last_ping'] = 0
+                        bytes_list.append(data['XYZ'][p].get('bytes_from_last_ping', 0))
+                    # If bytes field is missing or all zero, use per-ping bytes from XYZ.
+                    if 'bytes' not in data or not isinstance(data.get('bytes'), list) or \
+                            len(data.get('bytes', [])) != len(bytes_list) or \
+                            all([b == 0 for b in data.get('bytes', [])]):
+                        data['bytes'] = bytes_list
                 
                 # Ensure required plotting fields are present
                 # The plotting functions expect y_port, y_stbd, z_port, z_stbd fields
@@ -6882,17 +7610,24 @@ def _load_pickle_files_as_swath(self, pickle_files):
             try:
                 # Load pickle file
                 data, status = self.load_pickle_file(pickle_file)
+                data = recover_ping_bytes_from_pickle_data(data)
                 
                 # Add fsize_wc field if missing (required by sortDetectionsCoverage)
                 if 'fsize_wc' not in data:
-                    data['fsize_wc'] = data.get('fsize', os.path.getsize(pickle_file))
+                    data['fsize_wc'] = np.nan
                 
                 # Ensure bytes_from_last_ping field is present in XYZ data
                 if 'XYZ' in data:
+                    bytes_list = []
                     for p in range(len(data['XYZ'])):
                         if 'bytes_from_last_ping' not in data['XYZ'][p]:
                             # Add a default value (0) if not present
                             data['XYZ'][p]['bytes_from_last_ping'] = 0
+                        bytes_list.append(data['XYZ'][p].get('bytes_from_last_ping', 0))
+                    if 'bytes' not in data or not isinstance(data.get('bytes'), list) or \
+                            len(data.get('bytes', [])) != len(bytes_list) or \
+                            all([b == 0 for b in data.get('bytes', [])]):
+                        data['bytes'] = bytes_list
                 
                 # Ensure required plotting fields are present
                 # The plotting functions expect y_port, y_stbd, z_port, z_stbd fields
@@ -7095,6 +7830,85 @@ def load_pickle_file(self, pickle_file):
         raise Exception(f"Failed to load pickle file: {str(e)}")
 
 
+def recover_ping_bytes_from_pickle_data(data):
+    """Recover per-ping byte deltas from PKL content when possible."""
+    if not isinstance(data, dict) or 'XYZ' not in data or not isinstance(data['XYZ'], list):
+        return data
+
+    xyz_list = data['XYZ']
+    if len(xyz_list) == 0:
+        return data
+
+    def _normalize_pair_duplicated_bytes(byte_series):
+        # Some PKLs store ping-byte deltas duplicated per swath pair (a,a,b,b,...).
+        # Convert to (a,0,b,0,...) so ping-cycle aggregation matches raw parsing.
+        if not isinstance(byte_series, list) or len(byte_series) < 4 or len(byte_series) % 2 != 0:
+            return byte_series
+        try:
+            b = [float(x) if x is not None else 0.0 for x in byte_series]
+        except Exception:
+            return byte_series
+
+        pair_matches = 0
+        pair_count = len(b) // 2
+        for i in range(pair_count):
+            if b[2 * i] == b[2 * i + 1]:
+                pair_matches += 1
+
+        # Apply only when duplication pattern is dominant.
+        if pair_count > 0 and (pair_matches / pair_count) >= 0.8:
+            corrected = []
+            for i in range(pair_count):
+                corrected.append(b[2 * i])  # keep first swath byte delta
+                corrected.append(0.0)       # second swath represented as 0 for cycle aggregation
+            return corrected
+        return b
+
+    # Preferred: reconstruct from start_byte offsets if available. This generally best
+    # matches raw parsing behavior and avoids duplicated byte-series artifacts.
+    start_byte = data.get('start_byte')
+    if isinstance(start_byte, np.ndarray):
+        start_byte = start_byte.tolist()
+    if isinstance(start_byte, list) and len(start_byte) >= len(xyz_list):
+        try:
+            start_bytes = np.asarray(start_byte[:len(xyz_list)], dtype=float)
+            ping_bytes = [0.0] + np.diff(start_bytes).tolist()
+            ping_bytes = [max(0.0, b) for b in ping_bytes]
+            if any(b > 0 for b in ping_bytes):
+                ping_bytes = _normalize_pair_duplicated_bytes(ping_bytes)
+                for i in range(len(xyz_list)):
+                    xyz_list[i]['bytes_from_last_ping'] = ping_bytes[i]
+                data['bytes'] = ping_bytes
+                return data
+        except Exception:
+            pass
+
+    # If start_byte is unavailable/unusable, use top-level bytes (if valid).
+    top_bytes = data.get('bytes', [])
+    if isinstance(top_bytes, np.ndarray):
+        top_bytes = top_bytes.tolist()
+    if isinstance(top_bytes, list) and len(top_bytes) == len(xyz_list):
+        try:
+            top_bytes_num = [float(b) if b is not None else 0.0 for b in top_bytes]
+            if any(b > 0 for b in top_bytes_num):
+                top_bytes_num = _normalize_pair_duplicated_bytes(top_bytes_num)
+                for i in range(len(xyz_list)):
+                    xyz_list[i]['bytes_from_last_ping'] = top_bytes_num[i]
+                data['bytes'] = top_bytes_num
+                return data
+        except Exception:
+            pass
+
+    # Fallback: build bytes list from existing per-ping XYZ entries.
+    xyz_bytes = [entry.get('bytes_from_last_ping', 0) for entry in xyz_list]
+    xyz_bytes = _normalize_pair_duplicated_bytes(xyz_bytes)
+    if 'bytes' not in data or not isinstance(data.get('bytes'), list) or len(data.get('bytes', [])) != len(xyz_bytes) or \
+            all([b == 0 for b in data.get('bytes', [])]):
+        data['bytes'] = xyz_bytes
+
+    return data
+
+
 def load_swath_pkl(self):
     """Load pickle files as swath data (not archive data)"""
     # Debug logging to see when this function is being called
@@ -7205,6 +8019,7 @@ def load_swath_pkl(self):
                 try:
                     # Load pickle file
                     data, status = load_pickle_file(self, pickle_file)
+                    data = recover_ping_bytes_from_pickle_data(data)
                     
                     # Apply decimation if enabled
                     if hasattr(self, 'swath_pkl_dec_gb') and self.swath_pkl_dec_gb.isChecked():
@@ -7219,7 +8034,10 @@ def load_swath_pkl(self):
                     
                     # Add to swath PKL file list widget
                     if hasattr(self, 'swath_pkl_file_list'):
-                        self.swath_pkl_file_list.addItem(filename)
+                        display_text = pickle_file if getattr(self, 'show_swath_pkl_path_chk', None) and self.show_swath_pkl_path_chk.isChecked() else filename
+                        self.swath_pkl_file_list.addItem(display_text)
+                        if hasattr(self, 'original_swath_pkl_paths'):
+                            self.original_swath_pkl_paths[self.swath_pkl_file_list.count() - 1] = pickle_file
                     
                     # Process the data as swath data (not archive)
                     if hasattr(self, 'data_new'):
@@ -7236,14 +8054,20 @@ def load_swath_pkl(self):
                         
                         # Add fsize_wc field if missing (required by sortDetectionsCoverage)
                         if 'fsize_wc' not in data:
-                            data['fsize_wc'] = data.get('fsize', os.path.getsize(pickle_file))
+                            data['fsize_wc'] = np.nan
                         
                         # Ensure bytes_from_last_ping field is present in XYZ data
                         if 'XYZ' in data:
+                            bytes_list = []
                             for p in range(len(data['XYZ'])):
                                 if 'bytes_from_last_ping' not in data['XYZ'][p]:
                                     # Add a default value (0) if not present
                                     data['XYZ'][p]['bytes_from_last_ping'] = 0
+                                bytes_list.append(data['XYZ'][p].get('bytes_from_last_ping', 0))
+                            if 'bytes' not in data or not isinstance(data.get('bytes'), list) or \
+                                    len(data.get('bytes', [])) != len(bytes_list) or \
+                                    all([b == 0 for b in data.get('bytes', [])]):
+                                data['bytes'] = bytes_list
                         
                         # Ensure required plotting fields are present
                         # The plotting functions expect y_port, y_stbd, z_port, z_stbd fields

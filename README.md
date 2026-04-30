@@ -1,5 +1,7 @@
 # Swath Coverage Analysis Tools
 
+![Example Plot](media/Swath_Coverage.jpg)
+
 A comprehensive toolkit for analyzing swath coverage data from Kongsberg multibeam systems. This project provides two main applications for processing, converting, and visualizing swath coverage data.
 
 **Center for Coastal and Ocean Mapping (CCOM) / Joint Hydrographic Center (JHC), University of New Hampshire**
@@ -73,6 +75,7 @@ A comprehensive GUI application for analyzing and visualizing multibeam echosoun
 - **Archive Conversion from Raw Files**: "Convert to Archive PKL" can auto-calculate coverage first when needed
 - **Archive Conversion from Swath PKL**: "Convert to Archive PKL" on the Swath PKL tab converts loaded Swath PKL data directly to one Archive PKL
 - **Export Functionality**: Save all plots and export coverage trends (e.g., for Gap Filler)
+- **Analysis Group Export/Import**: Export plots + `settings.txt` + analysis JSON, then re-import sources and Plot/Filter settings
 - **Parameter Search**: Search acquisition parameters by mode, frequency, angles, and more
 - **Theoretical Performance**: Overlay theoretical coverage specification curves
 - **Session Persistence**: Remember directory preferences and settings
@@ -94,7 +97,7 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 **Basic Workflow:**
 1. Launch the application
 2. Load data using one of the following methods:
-   - **Raw Files tab**: Add KMALL/ALL files and click "Calc Coverage"
+   - **Raw Files tab**: Add KMALL/ALL files and click "Calculate Coverage"
    - **Swath PKL tab**: Load pre-converted PKL files (faster loading)
    - **Archive PKL tab**: Load previously archived data for comparison
 3. Optional archive creation paths:
@@ -111,11 +114,13 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 
 ### Left Panel — Sources & Log
 - **Sources** groupbox (tabbed):
-  - *Raw Files*: file list, Raw File Management, Process Raw Files (Calc Coverage, Scan Params Only, Convert to Swath PKL, Convert to Archive PKL)
+  - *Raw Files*: file list, Raw File Management, Process Raw Files (Calculate Coverage, Scan Params Only, Convert to Swath PKL, Convert to Archive PKL)
   - *Swath PKL*: file list, Swath PKL Management (Add/Remove/Clear/Add Directory, Convert to Archive PKL)
   - *Archive PKL*: file list, Archive PKL Management
   - *Spec Curve*: specification curve files
-- **Export Plots** groupbox: Save All Plots button
+- **Analysis & Plot Management** groupbox:
+  - **Export Analysis**: saves all plot images, `*_settings.txt`, and `*_analysis_group.json`
+  - **Import Analysis Group**: loads saved source files and restores Plot/Filter/system settings from JSON
 - **Activity Log**: color-coded scrolling log
 - **Status / Progress** area:
   - Current file label (updates during processing)
@@ -370,6 +375,7 @@ The **Trend** tab provides a full workflow for determining and exporting the swa
 ## Version History
 
 ### Swath Coverage Plotter
+- **v2026.09**: Added Analysis & Plot Management workflow (Export Analysis / Import Analysis Group), full source-file path export in settings/JSON, expanded Plot tab state persistence on import/export (including swath-angle lines, water-depth-multiple lines, Other options, and single-color selections), and multiple plot layout/title refinements for GUI + export consistency
 - **v2026.03**: Fixed .all file loading (corrected `parseEM` import in `readALLswath`); fixed `last_depth_clim` crash on first plot with no valid data; fixed empty array crash in `plot_coverage`
 - **v2026.02**: Coverage trend tab overhaul — Method pulldown (Mean, Mean+σ, Mean+2σ, Spline), # of Steps pulldown, Min Points parameter, # Points column in trend table, Digitize Trend button, Edit Depth Band Width drag editing, Clear All Points button, mirrored Show Coverage Trend checkbox, Width (Swath/Archive) filter, cursor shows filename only, Converting to PKL progress bar below Activity Log
 - **v2026.01**: Dark theme (Fusion + dark palette), Export Plots groupbox moved to left panel, Archive PKL Add Directory and Include Subdirectories, Show Path for all file lists, layout and naming updates

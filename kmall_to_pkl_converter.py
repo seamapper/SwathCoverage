@@ -15,7 +15,7 @@ Features:
 
 Author: Paul Johnson
 """
-__version__ = "2026.04"  
+__version__ = "2026.05"  
 
 import sys
 import os
@@ -26,6 +26,7 @@ import datetime
 from pathlib import Path
 from time import process_time
 import json
+import numpy as np
 
 # PyQt6 imports
 from PyQt6 import QtWidgets, QtCore, QtGui
@@ -447,7 +448,8 @@ class ConversionWorker(QThread):
             
             # Add file size information
             data['fsize'] = os.path.getsize(filename)
-            data['fsize_wc'] = os.path.getsize(filename)
+            # Keep WC size unknown unless explicitly available; this matches raw parser behavior.
+            data['fsize_wc'] = np.nan
             
             print(f"Successfully parsed KMALL file: {filename}")
             print(f"Found {len(data['XYZ'])} pings")
@@ -475,7 +477,7 @@ class ConversionWorker(QThread):
             
             # Add file size information
             data['fsize'] = os.path.getsize(filename)
-            data['fsize_wc'] = os.path.getsize(filename)
+            data['fsize_wc'] = np.nan
             
             print(f"Successfully parsed ALL file: {filename}")
             print(f"Found {len(data['XYZ'])} pings")
@@ -620,6 +622,23 @@ class ConversionWorker(QThread):
                                     if key in ['max_port_deg', 'max_stbd_deg', 'max_port_m', 'max_stbd_m']:
                                         continue
                                     det[key].append(0)
+
+                    # Recover per-ping byte deltas for data-rate plotting.
+                    ping_count = len(det['y_port'])
+                    recovered_bytes = None
+                    if isinstance(data.get('start_byte'), list) and len(data['start_byte']) >= ping_count and ping_count > 0:
+                        try:
+                            start_bytes = np.asarray(data['start_byte'][:ping_count], dtype=float)
+                            recovered_bytes = [0.0] + np.diff(start_bytes).tolist()
+                            recovered_bytes = [max(0.0, b) for b in recovered_bytes]
+                        except Exception:
+                            recovered_bytes = None
+                    if recovered_bytes is None and 'XYZ' in data and isinstance(data['XYZ'], list):
+                        xyz_bytes = [entry.get('bytes_from_last_ping', 0) for entry in data['XYZ'][:ping_count]]
+                        if len(xyz_bytes) == ping_count:
+                            recovered_bytes = xyz_bytes
+                    if recovered_bytes is not None:
+                        det['bytes'] = recovered_bytes
                     
                     # Create the optimized data structure exactly like the plotter does
                     optimized_data = {}
@@ -724,8 +743,11 @@ class ConversionWorker(QThread):
                     optimized_data['fsize'] = fsize
                     optimized_data['fsize_wc'] = fsize_wc
                     
-                    # Add start_byte as a list (one per ping, like the plotter)
-                    optimized_data['start_byte'] = [0] * len(xyz_data)
+                    # Preserve start_byte if available so bytes can be reconstructed at load time.
+                    if isinstance(data.get('start_byte'), list) and len(data['start_byte']) >= len(xyz_data):
+                        optimized_data['start_byte'] = data['start_byte'][:len(xyz_data)]
+                    else:
+                        optimized_data['start_byte'] = [0] * len(xyz_data)
                     
                     # Add cmnPart field (required by the plotter) - one per ping
                     if 'cmnPart' in data:

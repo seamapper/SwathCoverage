@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.08" 
+__version__ = "2026.10" 
 
 # BSD-3-Clause License
 #
@@ -186,6 +186,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Store original file paths for path display toggle
         self.original_swath_pkl_paths = {}  # Store original paths for Swath PKL files
+        self.spec_source_paths = {}  # Map displayed spec names to full file paths
         
         # Initialize decimation cache for performance optimization
         self.decimation_cache = {}  # Cache for decimated data per file
@@ -312,6 +313,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.remove_spec_btn.clicked.connect(self.remove_selected_spec_curves)
         self.calc_coverage_btn.clicked.connect(lambda: calc_coverage(self))
         self.save_all_plots_btn.clicked.connect(self.handle_save_all_plots)
+        self.import_analysis_group_btn.clicked.connect(self.handle_import_analysis_group)
         
         # Color and appearance buttons
         self.new_data_color_btn.clicked.connect(lambda: update_solid_color(self, 'color'))
@@ -731,7 +733,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                         'IN DEVELOPMENT: Load theoretical performance file')
         self.remove_spec_btn = PushButton('Remove Selected', btnw, btnh, 'remove_spec_btn',
                                           'Remove selected specification curves from the list and plot')
-        self.calc_coverage_btn = PushButton('Calc Coverage', btnw, btnh, 'calc_coverage_btn',
+        self.calc_coverage_btn = PushButton('Calculate Coverage', btnw, btnh, 'calc_coverage_btn',
                                             'Calculate coverage from loaded files')
         self.calc_coverage_btn.setEnabled(False)  # Disable on startup until files are loaded
         
@@ -747,7 +749,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_params_btn.setEnabled(False)  # Disable on startup until files are loaded
         
         # Export and save buttons
-        self.save_all_plots_btn = PushButton('Save All Plots', btnw, btnh, 'save_all_plots_btn', 'Save all plots (Depth, Backscatter, Ping Mode, Pulse Form, Swath Mode, Frequency, Data Rate, Timing) with settings')
+        self.save_all_plots_btn = PushButton('Export Analysis', btnw, btnh, 'save_all_plots_btn',
+                                             'Export all plots, settings text, and analysis JSON package')
+        self.import_analysis_group_btn = PushButton('Import Analysis Group', btnw, btnh, 'import_analysis_group_btn',
+                                                    'Import analysis files and settings from an exported JSON package')
+        # Allow these two buttons to expand equally across the available row width.
+        self.save_all_plots_btn.setMinimumWidth(0)
+        self.save_all_plots_btn.setMaximumWidth(16777215)
+        self.save_all_plots_btn.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.import_analysis_group_btn.setMinimumWidth(0)
+        self.import_analysis_group_btn.setMaximumWidth(16777215)
+        self.import_analysis_group_btn.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
 
         # Swath PKL file management buttons
         self.remove_swath_pkl_btn = PushButton('Remove Selected', btnw, btnh, 'remove_swath_pkl_btn', 'Remove selected Swath PKL files')
@@ -1249,6 +1261,9 @@ class MainWindow(QtWidgets.QMainWindow):
             # Remove from spec colors
             if hasattr(self, 'spec_colors') and filename in self.spec_colors:
                 del self.spec_colors[filename]
+            # Remove full path mapping for settings export
+            if hasattr(self, 'spec_source_paths') and filename in self.spec_source_paths:
+                del self.spec_source_paths[filename]
             # Remove from file list widget
             self.spec_file_list.takeItem(self.spec_file_list.row(item))
         
@@ -1895,8 +1910,13 @@ class MainWindow(QtWidgets.QMainWindow):
         toggle_chk_gb = GroupBox('Other options', toggle_chk_layout, False, False, 'other_options_gb')
 
         # Plotting and analysis group
-        plot_btn_gb = GroupBox('Export Plots',
-                               BoxLayout([self.save_all_plots_btn], 'v'),
+        analysis_btn_row = QtWidgets.QHBoxLayout()
+        analysis_btn_row.addWidget(self.save_all_plots_btn, 1)
+        analysis_btn_row.addWidget(self.import_analysis_group_btn, 1)
+        analysis_btn_layout = QtWidgets.QVBoxLayout()
+        analysis_btn_layout.addLayout(analysis_btn_row)
+        plot_btn_gb = GroupBox('Analysis && Plot Management',
+                               analysis_btn_layout,
                                False, False, 'plot_btn_gb')
 
         # Export functionality group (exports whatever trend is current in Trend tab)
@@ -2694,6 +2714,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     from libs.swath_coverage_lib import load_pickle_file
                 
                 data, status = load_pickle_file(self, pickle_file)
+                # Normalize/recover per-ping byte deltas so PKL data-rate matches raw behavior.
+                try:
+                    from .libs.swath_coverage_lib import recover_ping_bytes_from_pickle_data
+                except ImportError:
+                    from libs.swath_coverage_lib import recover_ping_bytes_from_pickle_data
+                data = recover_ping_bytes_from_pickle_data(data)
                 
                 if status and data:
                     # Apply decimation if enabled
@@ -2707,6 +2733,13 @@ class MainWindow(QtWidgets.QMainWindow):
                     # Add to data_new and filenames
                     self.data_new[filename] = data
                     self.filenames.append(pickle_file)
+                    if hasattr(self, 'swath_pkl_file_list'):
+                        existing_items = [self.swath_pkl_file_list.item(j).text() for j in range(self.swath_pkl_file_list.count())]
+                        display_text = pickle_file if getattr(self, 'show_swath_pkl_path_chk', None) and self.show_swath_pkl_path_chk.isChecked() else filename
+                        if display_text not in existing_items:
+                            self.swath_pkl_file_list.addItem(display_text)
+                            if hasattr(self, 'original_swath_pkl_paths'):
+                                self.original_swath_pkl_paths[self.swath_pkl_file_list.count() - 1] = pickle_file
                     
                     self.update_log(f"✓ Loaded swath pickle: {filename} ({status})")
             
@@ -2798,9 +2831,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def handle_save_all_plots(self):
         description = self.cruise_tb.text().strip()
         if not description:
-            QtWidgets.QMessageBox.warning(self, "Missing Description", "Please enter a description before saving all plots.")
+            QtWidgets.QMessageBox.warning(self, "Missing Description", "Please enter a description before exporting analysis.")
             return
         save_all_plots(self)
+
+    def handle_import_analysis_group(self):
+        import_analysis_group(self)
 
 
     def _check_decimation_settings_changed(self):
