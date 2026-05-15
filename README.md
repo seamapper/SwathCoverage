@@ -75,7 +75,9 @@ A comprehensive GUI application for analyzing and visualizing multibeam echosoun
 - **Archive Conversion from Raw Files**: "Convert to Archive PKL" can auto-calculate coverage first when needed
 - **Archive Conversion from Swath PKL**: "Convert to Archive PKL" on the Swath PKL tab converts loaded Swath PKL data directly to one Archive PKL
 - **Export Functionality**: Save all plots and export coverage trends (e.g., for Gap Filler)
-- **Analysis Group Export/Import**: Export plots + `settings.txt` + analysis JSON, then re-import sources and Plot/Filter settings
+- **Analysis Group Export/Import**: Export plots + `settings.txt` + analysis JSON, then re-import sources and Plot/Filter settings; remembers parent directory and save name between sessions and repeated exports
+- **Enter-to-Commit Parameters**: Numeric fields apply on **Enter**; uncommitted edits show an amber/orange border
+- **Editable Filter Fields When Off**: Set filter/limit values before enabling a filter; inactive fields stay editable but visually dimmed
 - **Parameter Search**: Search acquisition parameters by mode, frequency, angles, and more
 - **Theoretical Performance**: Overlay theoretical coverage specification curves
 - **Session Persistence**: Remember directory preferences and settings
@@ -90,7 +92,7 @@ python swath_coverage_plotter.py
 
 **Method 2: Windows Executable**
 ```
-Swath_Coverage_Plotter_v2026.03.exe
+Swath_Coverage_Plotter_v2026.11.exe
 ```
 Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 
@@ -104,7 +106,7 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
    - **Raw Files tab**: click **Convert to Archive PKL**; if coverage has not been calculated yet, the app will calculate coverage automatically before archiving
    - **Swath PKL tab**: click **Convert to Archive PKL** to convert loaded Swath PKL data to a single archive (prompts for parent directory and archive basename)
 4. Configure plot settings on the **Plot** tab (colors, limits, point style, etc.)
-5. Apply filters on the **Filter** tab as needed
+5. Apply filters on the **Filter** tab as needed (edit values first, then enable filters; press **Enter** in each field to commit)
 6. Explore plots across the nine center-panel tabs
 7. Use the **Trend** tab to calculate or digitize a coverage trend and export it
 
@@ -119,7 +121,7 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
   - *Archive PKL*: file list, Archive PKL Management
   - *Spec Curve*: specification curve files
 - **Analysis & Plot Management** groupbox:
-  - **Export Analysis**: saves all plot images, `*_settings.txt`, and `*_analysis_group.json`
+  - **Export Analysis**: saves all plot images, `*_settings.txt`, and `*_analysis_group.json` (requires a cruise/description on the Plot tab). Remembers the last parent directory and save name for the next export in the same session or a later session.
   - **Import Analysis Group**: loads saved source files and restores Plot/Filter/system settings from JSON
 - **Activity Log**: color-coded scrolling log
 - **Status / Progress** area:
@@ -144,10 +146,11 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 ### Right Panel — Controls (4 tabs, 240 px wide)
 
 #### Plot Tab
-- Custom system information (model, ship name, cruise)
+- Custom system information (model, ship name, cruise) — required description for **Export Analysis**
 - Depth reference (Waterline / Origin / TX Array / Raw Data)
 - Point style (color mode, single color, opacity, point size)
-- Custom plot limits (depth, swath width, data rate, ping interval)
+- **Scale colormap to** (All data | Filtered data | Fixed limits | Custom Plot) with Min/Max color-limit fields for **Fixed limits**
+- **Use Custom Plot Limits** (depth min/max, swath width, data rate, ping interval): limit boxes auto-fill from loaded data; values apply on **Enter**
 - Swath angle reference lines
 - Water depth multiple lines
 - Other options: grid lines, colorbar, spec lines, histogram, **Show Coverage Trend**
@@ -155,13 +158,38 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 #### Filter Tab
 - **Angle** filter (on by default): Min/Max degrees
 - **Depth (swath/archive)** filter (on): separate ranges for new and archive data
-- **Width (swath/archive)** filter (off by default): Min/Max width in meters; enabling also sets the Swath Width custom plot limit
+- **Width (swath/archive)** filter (off by default): Min/Max width in meters; enabling can sync the Swath Width custom plot limit once
 - **Backscatter** filter (on): Min/Max dB
 - **Ping Interval** filter (on): Min/Max seconds
 - **Hide angles near runtime limits** (on): angle buffer
 - **Hide coverage near runtime limits** (on): coverage buffer
 - **Limit plotted point count** (on): max points and decimation factor
 - **Swath PKL Memory Management** (off): max points per file and decimation factor
+
+Checkable filter/limit groupboxes control whether a filter is **applied**; Min/Max fields stay **editable even when a filter is off** (dimmed styling). Toggling a filter on or off triggers a debounced plot refresh; changing a numeric field requires **Enter** to commit and refresh.
+
+---
+
+## Parameter Fields and Plot Refresh
+
+### Enter to commit
+Most numeric line-edit fields (filters, custom plot limits, ship/cruise when custom info is used, etc.) do **not** apply while you type. Press **Enter** in a field to commit that value and refresh the plot.
+
+### Uncommitted (draft) values
+If the text in a field differs from the last committed value, the field shows an **amber/orange border** and tooltip *Press Enter to apply (uncommitted change)*. The plot continues to use the last committed value until you press Enter.
+
+### Filters off vs. on
+You can set Min/Max values while a filter groupbox is **unchecked** (inactive/dimmed appearance), then check the box to enable the filter without retyping. Checking or unchecking a filter schedules a plot refresh (about 5 seconds after the last change, combined with other control changes).
+
+### Colormap scaling vs. custom plot limits
+| **Scale colormap to** | Uses |
+|---|---|
+| All data | Min/max of plotted soundings |
+| Filtered data | Active depth or backscatter filter limits |
+| Fixed limits | **Point style** Min/Max color fields (enabled styling when selected) |
+| Custom Plot | **Use Custom Plot Limits** depth Min/Max (`min_z_tb` / `max_z_tb`) |
+
+Custom plot **depth** and **swath width** boxes are filled from the data extent after load (not hardcoded defaults). They are updated automatically as data changes unless you override them with committed custom values.
 
 #### Trend Tab
 - **Show Coverage Trend** checkbox (mirrors the Plot tab checkbox, bidirectionally synced)
@@ -363,6 +391,13 @@ The **Trend** tab provides a full workflow for determining and exporting the swa
    - For Swath PKL workflows, use **Swath PKL tab → Convert to Archive PKL** after loading PKL files
    - Check active filters (angle/depth/width/backscatter/runtime) and temporarily disable them to verify raw plotting
 
+7. **Parameter change does not update the plot**
+   - Press **Enter** in the field to commit the value (look for the amber border on uncommitted edits)
+   - Filter checkboxes refresh on their own; text fields do not apply until committed with Enter
+
+8. **Export Analysis asks for description**
+   - Enter a cruise/description on the Plot tab before exporting
+
 ### Getting Help
 
 1. Check the **Activity Log** in the left panel for detailed error messages
@@ -375,6 +410,7 @@ The **Trend** tab provides a full workflow for determining and exporting the swa
 ## Version History
 
 ### Swath Coverage Plotter
+- **v2026.11**: Enter-to-commit parameter fields with amber draft borders; filter/limit fields editable when groupboxes are off (inactive styling); custom plot depth/width limits auto-fill from data; Export Analysis remembers parent directory and save name between exports and sessions; single plot refresh after export; width filter included in debounced refresh; README and UI workflow documentation updates
 - **v2026.09**: Added Analysis & Plot Management workflow (Export Analysis / Import Analysis Group), full source-file path export in settings/JSON, expanded Plot tab state persistence on import/export (including swath-angle lines, water-depth-multiple lines, Other options, and single-color selections), and multiple plot layout/title refinements for GUI + export consistency
 - **v2026.03**: Fixed .all file loading (corrected `parseEM` import in `readALLswath`); fixed `last_depth_clim` crash on first plot with no valid data; fixed empty array crash in `plot_coverage`
 - **v2026.02**: Coverage trend tab overhaul — Method pulldown (Mean, Mean+σ, Mean+2σ, Spline), # of Steps pulldown, Min Points parameter, # Points column in trend table, Digitize Trend button, Edit Depth Band Width drag editing, Clear All Points button, mirrored Show Coverage Trend checkbox, Width (Swath/Archive) filter, cursor shows filename only, Converting to PKL progress bar below Activity Log

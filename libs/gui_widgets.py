@@ -3,7 +3,8 @@
 
 from PyQt6 import QtWidgets, QtGui
 from PyQt6.QtGui import QDoubleValidator
-from PyQt6.QtCore import Qt, QSize
+from PyQt6 import QtCore
+from PyQt6.QtCore import Qt, QSize, QEvent
 
 
 class PushButton(QtWidgets.QPushButton):
@@ -185,16 +186,37 @@ class TextEdit(QtWidgets.QTextEdit):
 
 class GroupBox(QtWidgets.QGroupBox):
     # generic class for a groupbox
-    def __init__(self, title='', layout=None, set_checkable=False, set_checked=False, name='NoName'):
+    def __init__(self, title='', layout=None, set_checkable=False, set_checked=False, name='NoName',
+                 keep_children_editable=True):
+        # Set before super().__init__(); Qt may emit changeEvent during construction.
+        self._keep_children_editable = bool(set_checkable and keep_children_editable)
         super(GroupBox, self).__init__()
         self.setTitle(title)
         self.setLayout(layout)
         self.setCheckable(set_checkable)
         self.setChecked(set_checked)
         self.setObjectName(name)
-        
-        # No specific styling needed for GroupBox - let child widgets handle their own styling
-        # self.setToolTip(tool_tip)
+        if self._keep_children_editable:
+            self.toggled.connect(lambda _: self._keep_child_widgets_enabled())
+            QtCore.QTimer.singleShot(0, self._keep_child_widgets_enabled)
+
+    def _editable_child_types(self):
+        return (QtWidgets.QLineEdit, QtWidgets.QComboBox, QtWidgets.QSpinBox, QtWidgets.QDoubleSpinBox)
+
+    def _keep_child_widgets_enabled(self):
+        """Keep parameter inputs editable when the groupbox filter/feature is unchecked."""
+        if not getattr(self, '_keep_children_editable', False):
+            return
+        for child in self.findChildren(QtWidgets.QWidget):
+            if child is self:
+                continue
+            if isinstance(child, self._editable_child_types()):
+                child.setEnabled(True)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if getattr(self, '_keep_children_editable', False) and event.type() == QEvent.Type.EnabledChange:
+            QtCore.QTimer.singleShot(0, self._keep_child_widgets_enabled)
 
 
 class FileList(QtWidgets.QListWidget):

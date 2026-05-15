@@ -141,6 +141,22 @@ def update_last_directory(config_key, directory):
         save_session_config(config)
 
 
+def remember_export_analysis_prefs(self, parent_dir=None, save_name=None):
+    """Persist Export Analysis parent directory and save name (session file + main window)."""
+    if not parent_dir and not save_name:
+        return
+    config = load_session_config()
+    if parent_dir:
+        self.last_plot_parent_dir = parent_dir
+        self.plot_save_dir = parent_dir
+        config["last_plot_parent_dir"] = parent_dir
+        config["last_plot_save_dir"] = parent_dir
+    if save_name:
+        self.last_plot_directory_name = save_name
+        config["last_plot_directory_name"] = save_name
+    save_session_config(config)
+
+
 def setup(self):
     # initialize other necessities
     # self.print_updates = True
@@ -343,17 +359,10 @@ def init_swath_ax(self):  # set initial swath parameters
     self.dr_max = 1000
     self.pi_max = 10
     self.x_max_custom = self.x_max  # store future custom entries
-    # Use default value from text box if it exists and is valid, otherwise default to 4000
-    if hasattr(self, 'max_z_tb') and self.max_z_tb.text():
-        try:
-            self.z_max_custom = float(self.max_z_tb.text())
-        except ValueError:
-            self.z_max_custom = 4000.0  # Default to 4000 if text box value is invalid
-            self.max_z_tb.setText('4000')
-    else:
-        self.z_max_custom = 4000.0  # Default to 4000
-        if hasattr(self, 'max_z_tb'):
-            self.max_z_tb.setText('4000')
+    # Max depth custom limit is filled from loaded data in update_plot_limits()
+    self.z_max_custom = 0.0
+    if hasattr(self, 'max_z_tb'):
+        self.max_z_tb.setText('')
     # Initialize custom min depth so refresh logic does not force fallback to 0.
     if hasattr(self, 'min_z_tb') and self.min_z_tb.text():
         try:
@@ -365,7 +374,9 @@ def init_swath_ax(self):  # set initial swath parameters
         self.z_min_custom = 0.0
     self.dr_max_custom = self.dr_max
     self.pi_max_custom = self.pi_max
-    self.max_x_tb.setText(str(self.x_max))
+    # Swath width custom limit is filled from loaded data in update_plot_limits()
+    if hasattr(self, 'max_x_tb'):
+        self.max_x_tb.setText('')
     self.max_dr_tb.setText(str(self.dr_max))
     self.max_pi_tb.setText(str(self.pi_max))
     update_color_modes(self)
@@ -563,6 +574,20 @@ def update_show_data_checks(self):
 
 def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_filters=True):
     # update swath plot with new data and options
+    filter_text_drafts = None
+    if hasattr(self, '_apply_committed_filter_text'):
+        filter_text_drafts = self._apply_committed_filter_text()
+    try:
+        return _refresh_plot_impl(
+            self, print_time=print_time, call_source=call_source,
+            sender=sender, validate_filters=validate_filters,
+        )
+    finally:
+        if filter_text_drafts is not None and hasattr(self, '_restore_filter_text_drafts'):
+            self._restore_filter_text_drafts(filter_text_drafts)
+
+
+def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, validate_filters=True):
     n_plotted = 0
     n_plotted_arc = 0
     self.legend_handles = []
@@ -911,9 +936,8 @@ def update_color_modes(self, update_clim_tb=False):
     # For now, set a default that will be overridden by tab-specific logic
     self.cmode_final = 'depth'  # default, will be overridden by tab context
     
-    # enable colorscale limit text boxes as appropriate for depth and backscatter tabs
-    for i, tb in enumerate([self.min_clim_tb, self.max_clim_tb]):
-        tb.setEnabled(self.clim_cbox.currentText() == 'Fixed limits')
+    if hasattr(self, 'update_filter_widget_styling'):
+        self.update_filter_widget_styling()
 
     # Handle color limits for depth and backscatter data
     if update_clim_tb:  # update text boxes last values if refresh_plot was called by change in cmode
@@ -1296,7 +1320,7 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
             if hasattr(self, 'min_z_tb') and hasattr(self, 'max_z_tb'):
                 try:
                     min_val = float(self.min_z_tb.text()) if self.min_z_tb.text() else 0.0
-                    max_val = float(self.max_z_tb.text()) if self.max_z_tb.text() else 4000.0
+                    max_val = float(self.max_z_tb.text()) if self.max_z_tb.text() else _custom_plot_max_depth(self)
                     self.clim = [min_val, max_val]
                     print(f'DEBUG: Using Custom Plot range for color scaling: {self.clim}')
                 except ValueError:
@@ -1591,7 +1615,7 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
             if hasattr(self, 'min_z_tb') and hasattr(self, 'max_z_tb'):
                 try:
                     min_val = float(self.min_z_tb.text()) if self.min_z_tb.text() else 0.0
-                    max_val = float(self.max_z_tb.text()) if self.max_z_tb.text() else 4000.0
+                    max_val = float(self.max_z_tb.text()) if self.max_z_tb.text() else _custom_plot_max_depth(self)
                     self.clim = [min_val, max_val]
                 except ValueError:
                     # Fallback to existing clim if values are invalid
@@ -1648,21 +1672,28 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
 def validate_filter_text(self):
     # validate user inputs before trying to apply filters and refresh plot
     valid_filters = True
-    tb_list = [self.min_angle_tb, self.max_angle_tb,
-               self.min_depth_tb, self.max_depth_tb, self.min_depth_arc_tb, self.max_depth_arc_tb,
-               self.min_width_tb, self.max_width_tb, self.min_width_arc_tb, self.max_width_arc_tb,
-               self.min_bs_tb, self.max_bs_tb, self.rtp_angle_buffer_tb, self.rtp_cov_buffer_tb]
+    filter_groups = [
+        (getattr(self, 'angle_gb', None), [self.min_angle_tb, self.max_angle_tb]),
+        (getattr(self, 'depth_gb', None), [self.min_depth_tb, self.max_depth_tb,
+                                           self.min_depth_arc_tb, self.max_depth_arc_tb]),
+        (getattr(self, 'width_gb', None), [self.min_width_tb, self.max_width_tb,
+                                            self.min_width_arc_tb, self.max_width_arc_tb]),
+        (getattr(self, 'bs_gb', None), [self.min_bs_tb, self.max_bs_tb]),
+        (getattr(self, 'rtp_angle_gb', None), [self.rtp_angle_buffer_tb]),
+        (getattr(self, 'rtp_cov_gb', None), [self.rtp_cov_buffer_tb]),
+    ]
 
-    for tb in tb_list:
-        try:
-            float(tb.text())
-            # Set white background but preserve text color
-            tb.setStyleSheet('background-color: white; color: black !important;')
-
-        except:
-            # Set yellow background for invalid input but preserve text color
-            tb.setStyleSheet('background-color: yellow; color: black !important;')
-            valid_filters = False
+    for gb, tb_list in filter_groups:
+        if gb is not None and not gb.isChecked():
+            continue
+        for tb in tb_list:
+            try:
+                float(tb.text())
+                tb.setProperty('filter_invalid', False)
+            except (TypeError, ValueError):
+                tb.setProperty('filter_invalid', True)
+                tb.setStyleSheet('background-color: #4a4020; color: #e8d080; border: 1px solid #a08030;')
+                valid_filters = False
 
     # Re-apply filter widget styling to ensure correct colors after validation
     if hasattr(self, 'update_filter_widget_styling'):
@@ -2533,6 +2564,16 @@ def update_axes(self):
     add_ref_filter_text(self)
 
 
+def _custom_plot_max_depth(self):
+    """Max depth for Custom Plot color scaling when max_z_tb is empty."""
+    margin = getattr(self, 'swath_ax_margin', 1.1)
+    if getattr(self, 'z_max_custom', 0) > 0:
+        return float(self.z_max_custom)
+    if getattr(self, 'z_max', 0) > 0:
+        return float(self.z_max) * margin
+    return 1000.0
+
+
 def update_plot_limits(self):
     # Keep custom min-depth cache in sync with user edits so it persists across refreshes
     # even when custom plot limits are temporarily unchecked.
@@ -2598,16 +2639,24 @@ def update_plot_limits(self):
 
     else:  # revert to automatic limits from the data if unchecked, but keep the custom numbers in text boxes
         self.plot_lim_gb.setChecked(False)
-        self.max_x_tb.setText(str(int(self.x_max_custom)))
+        if self.x_max_custom > 0:
+            self.max_x_tb.setText(str(int(self.x_max_custom)))
+        elif hasattr(self, 'max_x_tb'):
+            self.max_x_tb.setText('')
         if hasattr(self, 'min_z_tb'):
             if hasattr(self, 'z_min_custom'):
                 self.min_z_tb.setText(str(int(self.z_min_custom)))
             else:
                 self.min_z_tb.setText('0')
-        self.max_z_tb.setText(str(int(self.z_max_custom)))
+        if self.z_max_custom > 0:
+            self.max_z_tb.setText(str(int(self.z_max_custom)))
+        elif hasattr(self, 'max_z_tb'):
+            self.max_z_tb.setText('')
         self.max_dr_tb.setText(str(int(self.dr_max_custom)))
         self.max_pi_tb.setText(str(int(self.pi_max_custom)))
 
+    if hasattr(self, '_sync_plot_limit_textbox_commits'):
+        self._sync_plot_limit_textbox_commits()
 
     print('leaving update_plot_limits with self.dr_max and pi_max =', self.dr_max, self.pi_max)
 
@@ -3001,25 +3050,28 @@ def save_plot(self):
 
 def save_all_plots(self):
     # save all plots (Depth, Backscatter, Ping Mode, Pulse Form, Swath Mode, Frequency) with settings
-    # Load last used plot settings
     config = load_session_config()
-    last_parent_dir = config.get("last_plot_parent_dir", self.plot_save_dir.replace('\\', '/'))
-    last_directory_name = config.get("last_plot_directory_name", "swath_coverage_plots")
-    
+    last_parent_dir = getattr(self, 'last_plot_parent_dir', None) or config.get(
+        "last_plot_parent_dir", getattr(self, 'plot_save_dir', os.getcwd()))
+    last_directory_name = getattr(self, 'last_plot_directory_name', None) or config.get(
+        "last_plot_directory_name", "swath_coverage_plots")
+
     # First, ask for parent directory
-    parent_dir = QtWidgets.QFileDialog.getExistingDirectory(self, 'Select parent directory for saving plots', 
+    parent_dir = QtWidgets.QFileDialog.getExistingDirectory(self, 'Select parent directory for saving plots',
                                                             last_parent_dir)
     if not parent_dir:
         update_log(self, 'No parent directory selected for saving all plots.')
         return
-    
+    remember_export_analysis_prefs(self, parent_dir=parent_dir)
+
     # Then, ask for save name
-    save_name, ok = QtWidgets.QInputDialog.getText(self, 'Save Name', 
-                                                   'Enter a name for the plot directory:', 
+    save_name, ok = QtWidgets.QInputDialog.getText(self, 'Save Name',
+                                                   'Enter a name for the plot directory:',
                                                    text=last_directory_name)
     if not ok or not save_name.strip():
         update_log(self, 'No save name provided for saving all plots.')
         return
+    remember_export_analysis_prefs(self, save_name=save_name.strip())
     
     # Create the directory
     save_dir = os.path.join(parent_dir, save_name.strip())
@@ -3168,22 +3220,16 @@ def save_all_plots(self):
             update_log(self, f'Error saving {plot_type} plot: {str(e)}')
             update_log(self, f'Error details: {error_details}')
     
-    # Always restore original figure sizes after saving
+    # Always restore original figure sizes after saving, then refresh once for the GUI
     update_log(self, 'Resetting original image sizes... please wait...')
     for plot_type, figure in plot_types:
         if plot_type in original_sizes:
             figure.set_size_inches(original_sizes[plot_type][0], original_sizes[plot_type][1], forward=True)
-        refresh_plot(self, call_source='save_all_plots')
-    
-    # Save the new settings for next session
-    config["last_plot_parent_dir"] = parent_dir
-    config["last_plot_directory_name"] = save_name.strip()
-    config["last_plot_save_dir"] = parent_dir
-    save_session_config(config)
-    
-    # Update the plot save directory
-    self.plot_save_dir = parent_dir
-    
+
+    refresh_plot(self, print_time=False, call_source='save_all_plots')
+
+    remember_export_analysis_prefs(self, parent_dir=parent_dir, save_name=save_name.strip())
+
     update_log(self, f'Successfully exported analysis group with {saved_count} out of {len(plot_types)} plots to: {save_dir}')
 
 
@@ -3624,6 +3670,11 @@ def _apply_analysis_settings(self, payload):
         self._depth_limits_synced = True
     if imported_custom_enabled and has_imported_width_custom:
         self._width_limits_synced = True
+
+    if hasattr(self, '_sync_committed_filter_text_from_widgets'):
+        self._sync_committed_filter_text_from_widgets()
+    if hasattr(self, 'update_filter_widget_styling'):
+        self.update_filter_widget_styling()
 
 
 def import_analysis_group(self):

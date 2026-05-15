@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.10" 
+__version__ = "2026.11" 
 
 # BSD-3-Clause License
 #
@@ -91,6 +91,11 @@ import matplotlib.pyplot as plt
 
 
 class MainWindow(QtWidgets.QMainWindow):
+    # Auto-updated from loaded data; not pinned via commit/restore overlay during refresh.
+    PLOT_LIMIT_TEXTBOX_NAMES = frozenset({
+        'min_z_tb', 'max_z_tb', 'max_x_tb', 'max_dr_tb', 'max_pi_tb',
+    })
+
     """
     Main application window for the Swath Coverage Plotter.
     
@@ -152,12 +157,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # This provides session persistence for user convenience
         try:
             config = load_session_config()
-            self.plot_save_dir = config.get("last_plot_save_dir", os.getcwd())
+            self.last_plot_parent_dir = config.get("last_plot_parent_dir", os.getcwd())
+            self.last_plot_directory_name = config.get("last_plot_directory_name", "swath_coverage_plots")
+            self.plot_save_dir = config.get("last_plot_save_dir", self.last_plot_parent_dir)
             self.archive_save_dir = config.get("last_archive_save_dir", os.getcwd())
             self.export_save_dir = config.get("last_export_save_dir", os.getcwd())
             self.param_save_dir = config.get("last_param_save_dir", os.getcwd())
         except ImportError:
             # Fallback to current working directory if config loading fails
+            self.last_plot_parent_dir = os.getcwd()
+            self.last_plot_directory_name = "swath_coverage_plots"
             self.plot_save_dir = os.getcwd()
             self.archive_save_dir = os.getcwd()
             self.export_save_dir = os.getcwd()
@@ -270,7 +279,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Initialize custom plot limits
         self.x_max_custom = 0.0
         self.z_min_custom = 0.0
-        self.z_max_custom = 4000.0
+        self.z_max_custom = 0.0
         self.dr_max_custom = 1000
         self.pi_max_custom = 10
         self.dr_max = 1000
@@ -281,7 +290,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.set_center_layout()  # Main plotting area
         self.set_right_layout()   # Plot controls and parameters
         self.set_main_layout()    # Combine all layouts
-        
+
+        # Initialized before init_all_axes; populated when filter line-edit connections are wired.
+        self._filter_line_edits = {}
+        self._filter_text_committed = {}
+        self._filter_line_edit_tooltips = {}
+
         # Initialize plotting axes and setup
         init_all_axes(self)
         setup(self)  # initialize remaining variables and plotter params after UI elements are created
@@ -332,6 +346,7 @@ class MainWindow(QtWidgets.QMainWindow):
                   self.rtp_cov_gb,
                   self.angle_gb,
                   self.depth_gb,
+                  self.width_gb,
                   self.bs_gb,
                   self.angle_lines_gb,
                   self.n_wd_lines_gb,
@@ -369,7 +384,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         tb_map = [self.ship_tb,
                   self.cruise_tb,
-                  self.max_x_tb, self.max_z_tb,
+                  self.min_z_tb, self.max_x_tb, self.max_z_tb,
                   self.min_angle_tb, self.max_angle_tb,
                   self.min_depth_arc_tb, self.max_depth_arc_tb,
                   self.min_depth_tb, self.max_depth_tb,
@@ -393,11 +408,13 @@ class MainWindow(QtWidgets.QMainWindow):
                   self.swath_pkl_max_tb,
                   self.swath_pkl_dec_tb]
 
-        # if self.det or self.det_archive:  # execute only if data are loaded, not on startup
+        # Checkable groupboxes: keep fields editable when off; refresh when toggled on/off.
+        self._checkable_parameter_gbs = gb_map + [self.param_search_gb]
+
         for gb in gb_map:
-            #groupboxes tend to not have objectnames, so use generic sender string
-            gb.clicked.connect(lambda: self.update_filter_widget_styling())
-            gb.clicked.connect(lambda: self._schedule_filter_update(sender='GROUPBOX_CHK'))
+            gb.toggled.connect(lambda checked, gb=gb: self._on_checkable_groupbox_toggled(checked, gb))
+
+        self.param_search_gb.toggled.connect(lambda _: self.update_filter_widget_styling())
 
         for cbox in cbox_map:
             # lambda needs _ for cbox
@@ -417,9 +434,13 @@ class MainWindow(QtWidgets.QMainWindow):
         
         
 
+        self._filter_line_edits = {tb.objectName(): tb for tb in tb_map}
+        self._filter_text_committed = {name: tb.text() for name, tb in self._filter_line_edits.items()}
+        self._filter_line_edit_tooltips = {tb.objectName(): tb.toolTip() for tb in tb_map}
+
         for tb in tb_map:
-            # lambda seems to not need _ for tb
-            tb.returnPressed.connect(lambda sender=tb.objectName(): self._schedule_filter_update(sender=sender))
+            tb.returnPressed.connect(lambda tb=tb: self._on_filter_line_edit_return(tb))
+            tb.textChanged.connect(lambda _text='', tb=tb: self._apply_line_edit_style(tb))
 
         # set up annotations on hovering
         self.swath_canvas.mpl_connect('motion_notify_event', self.hover)
@@ -427,64 +448,230 @@ class MainWindow(QtWidgets.QMainWindow):
         # self.swath_canvas.mpl_connect('motion_notify_event', self.hover)
         # plt.show()
         
-        # Apply initial styling to filter widgets
+        for gb in self._checkable_parameter_gbs:
+            if hasattr(gb, '_keep_child_widgets_enabled'):
+                gb._keep_child_widgets_enabled()
+
+        self.clim_cbox.activated.connect(lambda _: self.update_filter_widget_styling())
         self.update_filter_widget_styling()
 
+    _LINEEDIT_ACTIVE_STYLE = """
+        QLineEdit {
+            color: #e0e0e0;
+            background-color: #2a2a2a;
+            border: 1px solid #606060;
+        }
+        QLineEdit:focus {
+            color: #e0e0e0;
+            background-color: #2a2a2a;
+            border: 1px solid #808080;
+        }
+    """
+    _LINEEDIT_INACTIVE_STYLE = """
+        QLineEdit {
+            color: #787878;
+            background-color: #1a1a1a;
+            border: 1px dashed #404040;
+        }
+        QLineEdit:focus {
+            color: #a0a0a0;
+            background-color: #222222;
+            border: 1px dashed #505050;
+        }
+    """
+    _LINEEDIT_ACTIVE_DRAFT_STYLE = """
+        QLineEdit {
+            color: #e0e0e0;
+            background-color: #2a2a2a;
+            border: 2px solid #d08020;
+        }
+        QLineEdit:focus {
+            color: #e0e0e0;
+            background-color: #2a2a2a;
+            border: 2px solid #e89830;
+        }
+    """
+    _LINEEDIT_INACTIVE_DRAFT_STYLE = """
+        QLineEdit {
+            color: #a0a0a0;
+            background-color: #1e1e1e;
+            border: 2px dashed #b06818;
+        }
+        QLineEdit:focus {
+            color: #c0c0c0;
+            background-color: #242424;
+            border: 2px dashed #d08020;
+        }
+    """
+    _LINEEDIT_DRAFT_TOOLTIP = 'Press Enter to apply (uncommitted change)'
+    _COMBO_ACTIVE_STYLE = """
+        QComboBox {
+            color: #e0e0e0;
+            background-color: #2a2a2a;
+            border: 1px solid #606060;
+        }
+        QComboBox QAbstractItemView {
+            color: #e0e0e0;
+            background-color: #2a2a2a;
+        }
+    """
+    _COMBO_INACTIVE_STYLE = """
+        QComboBox {
+            color: #787878;
+            background-color: #1a1a1a;
+            border: 1px dashed #404040;
+        }
+        QComboBox QAbstractItemView {
+            color: #a0a0a0;
+            background-color: #222222;
+        }
+    """
+    _GROUPBOX_ACTIVE_STYLE = "QGroupBox { color: #e0e0e0; }"
+    _GROUPBOX_INACTIVE_STYLE = "QGroupBox { color: #707070; }"
+
+    def _is_line_edit_draft(self, tb):
+        if not hasattr(self, '_filter_text_committed'):
+            return False
+        name = tb.objectName()
+        if name not in self._filter_text_committed:
+            return False
+        return tb.text() != self._filter_text_committed.get(name)
+
+    def _line_edit_parent_active(self, tb):
+        name = tb.objectName()
+        if name in ('min_clim_tb', 'max_clim_tb'):
+            return hasattr(self, 'clim_cbox') and self.clim_cbox.currentText() == 'Fixed limits'
+        if name in self.PLOT_LIMIT_TEXTBOX_NAMES:
+            return bool(getattr(self, 'plot_lim_gb', None) and self.plot_lim_gb.isChecked())
+        parent = tb.parent()
+        while parent is not None:
+            if isinstance(parent, GroupBox) and parent.isCheckable():
+                return parent.isChecked()
+            parent = parent.parent()
+        return True
+
+    def _apply_line_edit_style(self, tb):
+        """Apply active/inactive and draft (uncommitted) styling to a parameter line edit."""
+        if tb.property('filter_invalid'):
+            return
+        active = self._line_edit_parent_active(tb)
+        draft = self._is_line_edit_draft(tb)
+        if draft:
+            tb.setStyleSheet(
+                self._LINEEDIT_ACTIVE_DRAFT_STYLE if active else self._LINEEDIT_INACTIVE_DRAFT_STYLE
+            )
+            tb.setToolTip(self._LINEEDIT_DRAFT_TOOLTIP)
+        else:
+            tb.setStyleSheet(
+                self._LINEEDIT_ACTIVE_STYLE if active else self._LINEEDIT_INACTIVE_STYLE
+            )
+            tooltips = getattr(self, '_filter_line_edit_tooltips', {})
+            tb.setToolTip(tooltips.get(tb.objectName(), tb.toolTip()))
+        tb.setEnabled(True)
+
+    def _style_parameter_widget(self, widget, active):
+        if isinstance(widget, QtWidgets.QLineEdit):
+            self._apply_line_edit_style(widget)
+        elif isinstance(widget, QtWidgets.QComboBox):
+            widget.setStyleSheet(
+                self._COMBO_ACTIVE_STYLE if active else self._COMBO_INACTIVE_STYLE
+            )
+            widget.setEnabled(True)
+
+    def _style_checkable_groupbox_parameters(self, groupbox):
+        """Apply active/inactive styling; inputs stay editable when the groupbox is unchecked."""
+        active = groupbox.isChecked()
+        groupbox.setStyleSheet(
+            self._GROUPBOX_ACTIVE_STYLE if active else self._GROUPBOX_INACTIVE_STYLE
+        )
+        for child in groupbox.findChildren(QtWidgets.QWidget):
+            if child is groupbox:
+                continue
+            if isinstance(child, QtWidgets.QLineEdit):
+                self._apply_line_edit_style(child)
+            elif isinstance(child, QtWidgets.QComboBox):
+                self._style_parameter_widget(child, active)
+
     def update_filter_widget_styling(self):
-        """Update the styling of filter widgets based on their GroupBox state"""
-        # Define the filter widgets and their corresponding GroupBoxes
-        filter_widgets = [
-            # Angle filter - always show as enabled
-            ([self.min_angle_tb, self.max_angle_tb], self.angle_gb, True),
-            # Depth filter - should always look enabled (like Limit plotted point count)
-            ([self.min_depth_tb, self.max_depth_tb, self.min_depth_arc_tb, self.max_depth_arc_tb], self.depth_gb, True),
-            # Width filter - should always look enabled (like Depth filter)
-            ([self.min_width_tb, self.max_width_tb, self.min_width_arc_tb, self.max_width_arc_tb], self.width_gb, True),
-            # Backscatter filter - always show as enabled
-            ([self.min_bs_tb, self.max_bs_tb], self.bs_gb, True),
-            # Hide angles filter - always show as enabled
-            ([self.rtp_angle_buffer_tb], self.rtp_angle_gb, True),
-            # Hide coverage filter - always show as enabled
-            ([self.rtp_cov_buffer_tb], self.rtp_cov_gb, True),
-            # Angle lines filter - always show as enabled
-            ([self.angle_lines_tb_max, self.angle_lines_tb_int], self.angle_lines_gb, True),
-            # Water depth lines filter - always show as enabled
-            ([self.n_wd_lines_tb_max, self.n_wd_lines_tb_int], self.n_wd_lines_gb, True),
-        ]
-        
-        for filter_info in filter_widgets:
-            if len(filter_info) == 3:
-                # Special case for depth filter - always show as enabled
-                widgets, groupbox, force_enabled_style = filter_info
-                is_enabled = force_enabled_style
-            else:
-                # Normal case - use GroupBox state
-                widgets, groupbox = filter_info
-                is_enabled = groupbox.isChecked()
-            
-            for widget in widgets:
-                if is_enabled:
-                    # Enabled state: dark theme base and text
-                    widget.setStyleSheet("""
-                        QLineEdit {
-                            color: #e0e0e0;
-                            background-color: #2a2a2a;
-                            border: 1px solid #505050;
-                        }
-                        QLineEdit:focus {
-                            color: #e0e0e0;
-                            background-color: #2a2a2a;
-                        }
-                        QLineEdit:hover {
-                            color: #e0e0e0;
-                            background-color: #2a2a2a;
-                        }
-                    """)
+        """Style parameter inputs by whether their parent feature/filter is active (checked)."""
+        if hasattr(self, '_filter_line_edits'):
+            for tb in self._filter_line_edits.values():
+                if isinstance(tb, QtWidgets.QLineEdit):
+                    self._apply_line_edit_style(tb)
+            return
+        if not hasattr(self, '_checkable_parameter_gbs'):
+            return
+        for gb in self._checkable_parameter_gbs:
+            self._style_checkable_groupbox_parameters(gb)
+
+        if hasattr(self, 'min_clim_tb') and hasattr(self, 'clim_cbox'):
+            for tb in (self.min_clim_tb, self.max_clim_tb):
+                self._apply_line_edit_style(tb)
+
+    def _on_checkable_groupbox_toggled(self, checked, gb):
+        """Refresh plot when a filter/limit groupbox is enabled or disabled."""
+        self.update_filter_widget_styling()
+        sender = gb.objectName() if gb.objectName() else 'GROUPBOX_CHK'
+        self._schedule_filter_update(sender=sender)
+
+    def _commit_line_edit_text(self, tb):
+        """Record the current text of a line edit as the applied value (Enter to commit)."""
+        if hasattr(self, '_filter_text_committed'):
+            self._filter_text_committed[tb.objectName()] = tb.text()
+        self._apply_line_edit_style(tb)
+
+    def _sync_plot_limit_textbox_commits(self):
+        """Keep committed values aligned with auto-updated custom plot limit fields."""
+        for name in self.PLOT_LIMIT_TEXTBOX_NAMES:
+            widget = getattr(self, name, None)
+            if widget is not None:
+                self._commit_line_edit_text(widget)
+
+    def _sync_committed_filter_text_from_widgets(self):
+        """Align committed filter text with widget display (e.g. after import)."""
+        if not hasattr(self, '_filter_line_edits'):
+            return
+        for name, widget in self._filter_line_edits.items():
+            self._filter_text_committed[name] = widget.text()
+        self.update_filter_widget_styling()
+
+    def _apply_committed_filter_text(self):
+        """Temporarily show committed values in line edits for plot/filter logic."""
+        drafts = {}
+        skip = self.PLOT_LIMIT_TEXTBOX_NAMES
+        for name, widget in self._filter_line_edits.items():
+            if name in skip:
+                continue
+            committed = self._filter_text_committed.get(name, widget.text())
+            drafts[name] = widget.text()
+            if drafts[name] != committed:
+                widget.blockSignals(True)
+                widget.setText(committed)
+                widget.blockSignals(False)
+        return drafts
+
+    def _restore_filter_text_drafts(self, drafts):
+        """Restore in-progress edits after refresh_plot uses committed values."""
+        skip = self.PLOT_LIMIT_TEXTBOX_NAMES
+        for name, draft in drafts.items():
+            if name in skip:
+                continue
+            widget = self._filter_line_edits.get(name)
+            if widget is not None and widget.text() != draft:
+                widget.blockSignals(True)
+                widget.setText(draft)
+                widget.blockSignals(False)
+                self._apply_line_edit_style(widget)
+
+    def _on_filter_line_edit_return(self, tb):
+        """Apply a line-edit value when the user presses Enter."""
+        self._commit_line_edit_text(tb)
+        refresh_plot(self, sender=tb.objectName())
 
     def _schedule_filter_update(self, sender=None, delay_ms=5000):
         """Debounce expensive filter-driven updates so we only process once after the user pauses.
 
-        This is used for filter groupboxes, text boxes, checkboxes, and related controls.
+        Used for groupboxes, checkboxes, comboboxes, and radio buttons (not line edits).
         """
         # Lazily create the timer the first time we need it
         if self.filter_update_timer is None:
@@ -1568,12 +1755,10 @@ class MainWindow(QtWidgets.QMainWindow):
         min_clim_lbl = Label('Min:', width=40, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         self.min_clim_tb = LineEdit(str(self.clim_last_user['depth'][0]), 40, 20, 'min_clim_tb',
                                     'Set the minimum color limit')
-        self.min_clim_tb.setEnabled(False)
         min_clim_layout = BoxLayout([min_clim_lbl, self.min_clim_tb], 'h')
         max_clim_lbl = Label('Max:', width=40, alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         self.max_clim_tb = LineEdit(str(self.clim_last_user['depth'][1]), 40, 20, 'max_clim_tb',
                                     'Set the maximum color limit')
-        self.max_clim_tb.setEnabled(False)
         max_clim_layout = BoxLayout([max_clim_lbl, self.max_clim_tb], 'h')
         self.min_clim_tb.setValidator(QDoubleValidator(-1*np.inf, np.inf, 2))
         self.max_clim_tb.setValidator(QDoubleValidator(-1*np.inf, np.inf, 2))
@@ -1612,7 +1797,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.min_z_tb = LineEdit('', 40, 20, 'min_z_tb', 'Set the minimum depth of the plot')
         self.min_z_tb.setValidator(QDoubleValidator(0, 15000, 2))
-        self.max_z_tb = LineEdit('4000', 40, 20, 'max_z_tb', 'Set the maximum depth of the plot')
+        self.max_z_tb = LineEdit('', 40, 20, 'max_z_tb', 'Set the maximum depth of the plot')
         # Validator will be updated dynamically to ensure max >= min
         self.max_z_tb.setValidator(QDoubleValidator(0, 15000, 2))
         
@@ -2191,7 +2376,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.trend_method_cbox.currentTextChanged.connect(lambda: refresh_plot(self))
         # When Min Points changes, refresh plot so trend is recalculated and redrawn
         self.trend_min_points_tb.returnPressed.connect(lambda: refresh_plot(self))
-        self.trend_min_points_tb.editingFinished.connect(lambda: refresh_plot(self))
 
         # add tabs to tab layout (Trend before Search)
         self.tabs.addTab(self.tab1, 'Plot')
