@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.11" 
+__version__ = "2026.12" 
 
 # BSD-3-Clause License
 #
@@ -227,6 +227,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.spec_colors = {}  # dict to store assigned colors for each spec curve
         self.spec_color_palette = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
         self.skm_time = {}
+        self.timing_data_extracted = False
         self.sounding_fname = ''
         self.y_all = []
         self.trend_bin_centers = []
@@ -338,6 +339,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.param_search_btn.clicked.connect(lambda: update_param_search(self))
         self.save_param_log_btn.clicked.connect(lambda: save_param_log(self))
         self.scan_params_btn.clicked.connect(lambda: calc_coverage(self, params_only=True))
+        self.save_index_chk.toggled.connect(lambda checked: sync_save_index_checkboxes(self, self.save_index_chk))
+        self.save_index_pkl_chk.toggled.connect(lambda checked: sync_save_index_checkboxes(self, self.save_index_pkl_chk))
 
         # Set up event actions that call refresh_plot
         gb_map = [self.custom_info_gb,
@@ -912,6 +915,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                                'Include subdirectories when adding a directory of PKL files')
         self.convert_pickle_btn = PushButton('Convert to Swath PKL', btnw, btnh, 'convert_pickle_btn',
                                              'Convert source files to optimized pickle files for faster loading')
+        self.save_index_pkl_chk = CheckBox('Save Index File', True, 'save_index_pkl_chk',
+                                           'Keep .swathcov.idx sidecar files next to KMALL sources for faster re-indexing')
         self.swath_pkl_compression_chk = CheckBox('Enable compression', True, 'swath_pkl_compression_chk',
                                                   'Enable gzip compression for Swath PKL files (30-70% smaller)')
         
@@ -923,6 +928,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.calc_coverage_btn = PushButton('Calculate Coverage', btnw, btnh, 'calc_coverage_btn',
                                             'Calculate coverage from loaded files')
         self.calc_coverage_btn.setEnabled(False)  # Disable on startup until files are loaded
+        self.save_index_chk = CheckBox('Save Index File', True, 'save_index_chk',
+                                       'Keep .swathcov.idx sidecar files next to KMALL sources for faster re-indexing')
+        self.extract_timing_chk = CheckBox('Extract Timing', False, 'extract_timing_chk',
+                                           'Parse SKM attitude datagrams and show the Timing plot tab')
         
         # Parameter scanning button (fast mode)
         self.scan_params_btn = PushButton('Scan Params Only', btnw, btnh, 'scan_params_btn',
@@ -991,9 +1000,9 @@ class MainWindow(QtWidgets.QMainWindow):
         raw_swath_btn_gb = GroupBox('Raw File Management', raw_swath_btn_layout, False, False, 'raw_swath_btn_gb')
         
         # Process swath files buttons - group related buttons and checkboxes
-        swath_pkl_group_layout = BoxLayout([self.convert_pickle_btn, self.swath_pkl_compression_chk], 'v')
+        swath_pkl_group_layout = BoxLayout([self.convert_pickle_btn, self.save_index_pkl_chk, self.swath_pkl_compression_chk], 'v')
         archive_group_layout = BoxLayout([self.archive_data_btn, self.archive_compression_chk], 'v')
-        process_btn_layout = BoxLayout([self.calc_coverage_btn, self.scan_params_btn, swath_pkl_group_layout, archive_group_layout], 'v')
+        process_btn_layout = BoxLayout([self.calc_coverage_btn, self.save_index_chk, self.extract_timing_chk, self.scan_params_btn, swath_pkl_group_layout, archive_group_layout], 'v')
         process_btn_gb = GroupBox('Process Raw Files', process_btn_layout, False, False, 'process_btn_gb')
         
         # Show path checkbox for raw swath sources
@@ -1169,12 +1178,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.calc_coverage_btn.setEnabled(has_source_files)
         self.scan_params_btn.setEnabled(has_source_files)
         self.convert_pickle_btn.setEnabled(has_source_files)
-        
-        # Update Convert to Swath PKL button color
-        if has_source_files:
-            self.convert_pickle_btn.setStyleSheet("background-color: #FFB347; color: black; font-weight: bold;")
-        else:
-            self.convert_pickle_btn.setStyleSheet("")
         
         # Update Save All Plots button color based on data availability
         self.update_save_plots_button_color()
@@ -1636,6 +1639,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plot_tabs.addTab(self.plot_tab7, 'Data Rate')
         self.plot_tabs.addTab(self.plot_tab8, 'Timing')
         self.plot_tabs.addTab(self.plot_tab9, 'Parameters')
+        self.timing_tab_index = self.plot_tabs.indexOf(self.plot_tab8)
+        self.extract_timing_chk.toggled.connect(lambda: update_timing_tab_visibility(self))
+        update_timing_tab_visibility(self)
 
         self.center_layout = BoxLayout([self.plot_tabs], 'v')
         # self.center_layout.addStretch()

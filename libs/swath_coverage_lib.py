@@ -46,7 +46,7 @@ from PyQt6.QtCore import Qt, QSize
 
 from . import parseEM
 from .file_fun import *
-from .swath_fun import readALLswath, readKMALLswath, interpretMode, adjust_depth_ref
+from .swath_fun import readALLswath, readKMALLswath, interpretMode, adjust_depth_ref, remove_kmall_index_cache
 
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -572,6 +572,52 @@ def update_show_data_checks(self):
         self.spec_chk.setChecked(False)
 
 
+def update_timing_tab_visibility(self):
+    """Show or hide the Timing plot tab based on Extract Timing checkbox state."""
+    if not hasattr(self, 'plot_tabs') or not hasattr(self, 'timing_tab_index'):
+        return
+    show_timing = bool(getattr(self, 'extract_timing_chk', None) and self.extract_timing_chk.isChecked())
+    self.plot_tabs.setTabVisible(self.timing_tab_index, show_timing)
+    if not show_timing and self.plot_tabs.currentIndex() == self.timing_tab_index:
+        self.plot_tabs.setCurrentIndex(0)
+
+
+def save_index_file_enabled(self):
+    """Return whether KMALL index sidecars should be kept on disk."""
+    if hasattr(self, 'save_index_chk'):
+        return self.save_index_chk.isChecked()
+    if hasattr(self, 'save_index_pkl_chk'):
+        return self.save_index_pkl_chk.isChecked()
+    return True
+
+
+def cleanup_kmall_index_if_disabled(self, kmall_path):
+    """Remove KMALL index sidecar when Save Index File is unchecked."""
+    if kmall_path and str(kmall_path).lower().endswith('.kmall') and not save_index_file_enabled(self):
+        remove_kmall_index_cache(kmall_path)
+
+
+def cleanup_kmall_indexes_if_disabled(self, kmall_paths):
+    """Remove KMALL index sidecars for a list of source files when saving is disabled."""
+    if save_index_file_enabled(self):
+        return
+    for kmall_path in kmall_paths:
+        cleanup_kmall_index_if_disabled(self, kmall_path)
+
+
+def sync_save_index_checkboxes(self, source_checkbox):
+    """Keep Save Index File checkboxes in Process Raw Files and PKL sections aligned."""
+    if not hasattr(self, 'save_index_chk') or not hasattr(self, 'save_index_pkl_chk'):
+        return
+    checked = source_checkbox.isChecked()
+    for checkbox in (self.save_index_chk, self.save_index_pkl_chk):
+        if checkbox is source_checkbox:
+            continue
+        checkbox.blockSignals(True)
+        checkbox.setChecked(checked)
+        checkbox.blockSignals(False)
+
+
 def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_filters=True):
     # update swath plot with new data and options
     filter_text_drafts = None
@@ -823,7 +869,8 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
                 update_log(self, f'Error: Failed to plot data rate - {str(e)}')
 
         try:
-            plot_time_diff(self)
+            if getattr(self, 'timing_data_extracted', False):
+                plot_time_diff(self)
 
         except:
             # DEBUG: failed to plot time diff
@@ -1798,6 +1845,7 @@ def calc_coverage(self, params_only=False):
 
         i = 0  # counter for successfully parsed files (data_new index)
         f = 0  # placeholder if no fnames_new
+        kmall_paths_attempted = []
 
         tic1 = process_time()
 
@@ -1859,14 +1907,20 @@ def calc_coverage(self, params_only=False):
 
                 elif ftype == 'kmall':  # read .all file for coverage (incl. params) or just params
                     update_log(self, f"Parsing .kmall file: {fname_str}")
-                    include_skm = not params_only
+                    kmall_paths_attempted.append(fnames_new[f])
+                    extract_timing = (not params_only and
+                                      getattr(self, 'extract_timing_chk', None) and
+                                      self.extract_timing_chk.isChecked())
+                    include_skm = extract_timing
+                    save_index_file = save_index_file_enabled(self)
                     
                     # Time the KMALL processing with optimized reader
                     kmall_start_time = process_time()
                     print('calling readKMALLswath from calc_coverage')
                     data_new[i] = readKMALLswath(self, fnames_new[f], print_updates=self.print_updates,
-                                                 include_skm=not params_only, parse_params_only=params_only,
-                                                 read_mode='plot' if not params_only else 'param')
+                                                 include_skm=include_skm, parse_params_only=params_only,
+                                                 read_mode='plot' if not params_only else 'param',
+                                                 save_index_file=save_index_file)
                     kmall_end_time = process_time()
                     kmall_processing_time = kmall_end_time - kmall_start_time
                     print('***back from readKMALLswath in calc_coverage')
@@ -1886,6 +1940,8 @@ def calc_coverage(self, params_only=False):
                         data_new[i]['XYZ'][p]['bytes_from_last_ping'] = ping_bytes[p]
 
                     try:  # simplify SKM header and sample times for plotting
+                        if not extract_timing:
+                            raise KeyError('SKM extraction disabled')
                         num_SKM = len(data_new[i]['SKM']['header'])
                         # print('********* trying to print items in sample datagram j')
                         # sample_keys = [k for k in data_new[i]['SKM']['sample'].keys()]
@@ -1933,6 +1989,8 @@ def calc_coverage(self, params_only=False):
                     self.fnames_plotted_cov.append(fname_str)
 
             except Exception as e:  # failed to parse this file
+                if ftype == 'kmall':
+                    cleanup_kmall_index_if_disabled(self, fnames_new[f])
                 if hasattr(self, 'log_error'):
                     self.log_error(f"Failed to parse {fname_str}", e)
                 else:
@@ -1977,6 +2035,10 @@ def calc_coverage(self, params_only=False):
         update_system_info(self, self.det, force_update=True, fname_str_replace='_trimmed')
 
         if not params_only:  # set show data chk to True (and refresh that way) or refresh plot directly, but not both!
+            self.timing_data_extracted = bool(getattr(self, 'extract_timing_chk', None) and
+                                              self.extract_timing_chk.isChecked())
+            update_timing_tab_visibility(self)
+
             if not self.show_data_chk.isChecked():
                 self.show_data_chk.setChecked(True)
 
@@ -1988,6 +2050,8 @@ def calc_coverage(self, params_only=False):
         else:
             self.tabs.setCurrentIndex(2)  # show param search tab
             self.plot_tabs.setCurrentIndex(3)  # show parameter history tab
+
+        cleanup_kmall_indexes_if_disabled(self, kmall_paths_attempted)
 
         sort_det_time(self)  # sort all detections by time for runtime parameter logging/searching
 
@@ -2053,6 +2117,8 @@ def sortDetectionsCoverage(self, data, print_updates=False, params_only=False):
 
             else:  # sort port and stbd data
                 det_int = data[f]['XYZ'][p][det_int_key]  # get detection integers for this ping
+                if not det_int:
+                    continue
                 # print('********* ping', p, '************')
                 # print('det_int=', det_int)
                 # find indices of port and stbd outermost valid detections (detectionType = 0 for KMALL)
@@ -3091,8 +3157,9 @@ def save_all_plots(self):
         ('Swath_Mode', self.swathmode_figure),
         ('Frequency', self.frequency_figure),
         ('Data_Rate', self.data_figure),
-        ('Timing', self.time_figure)
     ]
+    if getattr(self, 'timing_data_extracted', False):
+        plot_types.append(('Timing', self.time_figure))
     
     # Check for existing files and ask for overwrite permission
     existing_files = []
@@ -3346,6 +3413,10 @@ def _collect_analysis_settings(self):
                 'max_data_rate': self.max_dr_tb.text(),
                 'max_ping_interval': self.max_pi_tb.text()
             }
+        },
+        'process_settings': {
+            'save_index_file': save_index_file_enabled(self),
+            'extract_timing': bool(getattr(self, 'extract_timing_chk', None) and self.extract_timing_chk.isChecked())
         }
     }
 
@@ -3454,6 +3525,12 @@ def save_settings_info(self, save_dir, save_name):
             f.write(f"Max Width: {self.max_x_tb.text()} m\n")
             f.write(f"Max Data Rate: {self.max_dr_tb.text()}\n")
             f.write(f"Max Ping Interval: {self.max_pi_tb.text()}\n")
+
+            f.write("\nPROCESS SETTINGS:\n")
+            f.write("-" * 19 + "\n")
+            f.write(f"Save Index File: {save_index_file_enabled(self)}\n")
+            if hasattr(self, 'extract_timing_chk'):
+                f.write(f"Extract Timing: {self.extract_timing_chk.isChecked()}\n")
             
             # Save timestamp
             f.write(f"\nSaved on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -3477,6 +3554,18 @@ def _apply_analysis_settings(self, payload):
     system_info = payload.get('system_information', {})
     filter_settings = payload.get('filter_settings', {})
     plot_settings = payload.get('plot_settings', {})
+    process_settings = payload.get('process_settings', {})
+
+    if hasattr(self, 'save_index_chk') and process_settings.get('save_index_file') is not None:
+        checked = bool(process_settings.get('save_index_file'))
+        self.save_index_chk.setChecked(checked)
+        if hasattr(self, 'save_index_pkl_chk'):
+            self.save_index_pkl_chk.blockSignals(True)
+            self.save_index_pkl_chk.setChecked(checked)
+            self.save_index_pkl_chk.blockSignals(False)
+    if hasattr(self, 'extract_timing_chk') and process_settings.get('extract_timing') is not None:
+        self.extract_timing_chk.setChecked(bool(process_settings.get('extract_timing')))
+        update_timing_tab_visibility(self)
 
     # System information
     if hasattr(self, 'model_cbox'):
@@ -7242,7 +7331,8 @@ def convert_files_to_pickle(self):
                         kmall_start_time = process_time()
                         data = readKMALLswath(self, source_file, print_updates=False, 
                                              include_skm=False, parse_params_only=False,
-                                             read_mode='plot')  # Use optimized plot mode for faster PKL creation
+                                             read_mode='plot',
+                                             save_index_file=save_index_file_enabled(self))
                         kmall_end_time = process_time()
                         kmall_processing_time = kmall_end_time - kmall_start_time
                         
@@ -7255,6 +7345,7 @@ def convert_files_to_pickle(self):
                     else:
                         continue
                 except Exception as e:
+                    cleanup_kmall_index_if_disabled(self, source_file)
                     failed_count += 1
                     if hasattr(self, 'log_error'):
                         self.log_error(f"Failed to parse {os.path.basename(source_file)}", e)
@@ -7486,6 +7577,7 @@ def convert_files_to_pickle(self):
                 total_size_saved += size_saved
                 
                 converted_count += 1
+                cleanup_kmall_index_if_disabled(self, source_file)
                 
                 if hasattr(self, 'log_success'):
                     self.log_success(f"Converted {os.path.basename(source_file)} in {parse_time:.2f}s "
@@ -7495,6 +7587,7 @@ def convert_files_to_pickle(self):
                                    f"({source_size/(1024*1024):.1f}MB → {pickle_size/(1024*1024):.1f}MB)")
                 
             except Exception as e:
+                cleanup_kmall_index_if_disabled(self, source_file)
                 failed_count += 1
                 if hasattr(self, 'log_error'):
                     self.log_error(f"Failed to convert {os.path.basename(source_file)}", e)

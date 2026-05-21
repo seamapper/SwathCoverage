@@ -48,7 +48,7 @@ sys.path.insert(0, current_dir)
 
 try:
     # Try importing from the libs folder
-    from libs.swath_fun import readKMALLswath, readALLswath
+    from libs.swath_fun import readKMALLswath, readALLswath, remove_kmall_index_cache
     print("Successfully imported libraries from libs folder")
     MULTIBEAM_TOOLS_AVAILABLE = True
 except ImportError as e:
@@ -116,7 +116,7 @@ class ConversionWorker(QThread):
     error_occurred = pyqtSignal(str)  # error message
     
     def __init__(self, input_files, output_dir, use_compression=True, overwrite_existing=False,
-                 make_archive=False, archive_basename=""):
+                 make_archive=False, archive_basename="", save_index_file=True):
         super().__init__()
         self.input_files = input_files
         self.output_dir = output_dir
@@ -124,7 +124,12 @@ class ConversionWorker(QThread):
         self.overwrite_existing = overwrite_existing
         self.make_archive = make_archive
         self.archive_basename = archive_basename
+        self.save_index_file = save_index_file
         self.cancelled = False
+
+    def _cleanup_index_if_disabled(self, source_file):
+        if not self.save_index_file and str(source_file).lower().endswith('.kmall'):
+            remove_kmall_index_cache(source_file)
     
     def run(self):
         """Main conversion process"""
@@ -195,10 +200,12 @@ class ConversionWorker(QThread):
                                 self.progress_updated.emit(i + 1, 
                                                          f"Converted {filename} in {conversion_time:.2f}s "
                                                          f"({input_size/(1024*1024):.1f}MB → output file not found)")
+                            self._cleanup_index_if_disabled(input_file)
                         else:
                             results['failed'] += 1
                             results['errors'].append(f"Failed to convert {filename}")
                             self.progress_updated.emit(i + 1, f"Failed to convert {filename} (after {conversion_time:.2f}s)")
+                            self._cleanup_index_if_disabled(input_file)
                             
                     except Exception as e:
                         # Calculate time even for failed conversions
@@ -209,6 +216,7 @@ class ConversionWorker(QThread):
                         error_msg = f"Error converting {filename} (after {conversion_time:.2f}s): {str(e)}"
                         results['errors'].append(error_msg)
                         self.progress_updated.emit(i + 1, error_msg)
+                        self._cleanup_index_if_disabled(input_file)
                         print(f"Detailed error for {filename}: {e}")
                         import traceback
                         traceback.print_exc()
@@ -324,9 +332,11 @@ class ConversionWorker(QThread):
                     self.progress_updated.emit(i + 1, f"Added {filename} to archive")
                 else:
                     self.progress_updated.emit(i + 1, f"Skipped {filename} (no valid detections)")
+                self._cleanup_index_if_disabled(input_file)
             
             except Exception as e:
                 self.progress_updated.emit(i + 1, f"Failed {filename}: {str(e)}")
+                self._cleanup_index_if_disabled(input_file)
         
         if converted_files == 0:
             return None
@@ -372,7 +382,7 @@ class ConversionWorker(QThread):
                 return False
             
             # Process the data for plotting
-            processed_data = self.process_data_for_plotting(data)
+            processed_data = self.process_data_for_plotting(data, source_file=input_file)
             
             # If processing failed, don't create a PKL file
             if processed_data is None:
@@ -443,8 +453,10 @@ class ConversionWorker(QThread):
             from libs.swath_fun import readKMALLswath
             import os
             
-            # Use the proper readKMALLswath function which handles coordinate conversion correctly
-            data = readKMALLswath(self, filename, print_updates=True, read_mode='full')
+            # Coverage PKLs need outermost soundings only (same fast path as the plotter).
+            data = readKMALLswath(self, filename, print_updates=True,
+                                  include_skm=False, parse_params_only=False,
+                                  read_mode='plot', save_index_file=self.save_index_file)
             
             # Add file size information
             data['fsize'] = os.path.getsize(filename)
@@ -466,14 +478,11 @@ class ConversionWorker(QThread):
         
         try:
             import os
-            from libs.swath_fun import readALLswath, convertXYZ
+            from libs.swath_fun import readALLswath
             
-            # Use the proper readALLswath function which handles coordinate conversion correctly
-            data = readALLswath(self, filename, print_updates=True, parse_outermost_only=False)
-            
-            # Convert XYZ coordinates for ALL files (required step)
-            converted_data = convertXYZ({0: data}, print_updates=True)
-            data = converted_data[0]
+            # Coverage PKLs need outermost soundings only (same as the plotter).
+            data = readALLswath(self, filename, print_updates=True,
+                                parse_outermost_only=True, parse_params_only=False)
             
             # Add file size information
             data['fsize'] = os.path.getsize(filename)
@@ -487,7 +496,7 @@ class ConversionWorker(QThread):
             print(f"Error parsing ALL file {filename}: {e}")
             raise
     
-    def process_data_for_plotting(self, data):
+    def process_data_for_plotting(self, data, source_file=None):
         """Process parsed data for PKL conversion - match plotter's convert_files_to_pickle structure"""
         if not MULTIBEAM_TOOLS_AVAILABLE:
             print("Multibeam tools libraries not available - conversion will fail")
@@ -495,289 +504,146 @@ class ConversionWorker(QThread):
 
         try:
             print("Processing data for PKL conversion...")
-            
-            # The parsed data is a dictionary, so we need to access it differently
-            if isinstance(data, dict):
-                # Check if we have XYZ data directly in the dictionary
-                if 'XYZ' in data:
-                    xyz_data = data['XYZ']
-                    print(f"Found XYZ data with {len(xyz_data)} pings")
-                    
-                    # Get file information
-                    fname = data.get('fname', 'unknown')
-                    fsize = data.get('fsize', 0)
-                    fsize_wc = data.get('fsize_wc', 0)
-                    
-                    # Ensure fname is a string, not a list
-                    if isinstance(fname, list) and len(fname) > 0:
-                        fname = fname[0]  # Take the first element if it's a list
-                    elif not isinstance(fname, str):
-                        fname = str(fname)  # Convert to string if it's not already
-                    
-                    if not xyz_data:
-                        print("No XYZ data found in parsed file")
-                        return None
-                    
-                    # Replicate sortDetectionsCoverage functionality to create the exact structure
-                    # that the plotter expects in its PKL files
-                    det_key_list = ['fname', 'model', 'datetime', 'date', 'time', 'sn',
-                                  'y_port', 'y_stbd', 'z_port', 'z_stbd', 'bs_port', 'bs_stbd', 
-                                  'rx_angle_port', 'rx_angle_stbd',
-                                  'ping_mode', 'pulse_form', 'swath_mode', 'frequency',
-                                  'max_port_deg', 'max_stbd_deg', 'max_port_m', 'max_stbd_m',
-                                  'tx_x_m', 'tx_y_m', 'tx_z_m', 'tx_r_deg', 'tx_p_deg', 'tx_h_deg',
-                                  'rx_x_m', 'rx_y_m', 'rx_z_m', 'rx_r_deg', 'rx_p_deg', 'rx_h_deg',
-                                  'aps_num', 'aps_x_m', 'aps_y_m', 'aps_z_m', 'wl_z_m',
-                                  'bytes', 'fsize', 'fsize_wc']
-                    
-                    det = {k: [] for k in det_key_list}
-                    
-                    # Process each ping to find outermost valid soundings
-                    for p in range(len(xyz_data)):
-                        ping_data = xyz_data[p]
-                        
-                        # Get ping info
-                        ping_info = data.get('pingInfo', [])
-                        if p < len(ping_info):
-                            ping_info_data = ping_info[p]
-                        else:
-                            ping_info_data = {}
-                        
-                        # Extract sounding data
-                        if 'z_reRefPoint_m' in ping_data and 'y_reRefPoint_m' in ping_data:
-                            z_values = ping_data['z_reRefPoint_m']
-                            y_values = ping_data['y_reRefPoint_m']
-                            bs_values = ping_data.get('reflectivity1_dB', [])
-                            angle_values = ping_data.get('beamAngleReRx_deg', [])
-                            
-                            if len(z_values) > 0 and len(y_values) > 0:
-                                # Find outermost valid soundings (port and starboard)
-                                port_idx = None
-                                stbd_idx = None
-                                
-                                # Find outermost port sounding (most negative y)
-                                for i, y in enumerate(y_values):
-                                    if y < 0:  # Port side
-                                        if port_idx is None or y < y_values[port_idx]:
-                                            port_idx = i
-                                
-                                # Find outermost starboard sounding (most positive y)
-                                for i, y in enumerate(y_values):
-                                    if y > 0:  # Starboard side
-                                        if stbd_idx is None or y > y_values[stbd_idx]:
-                                            stbd_idx = i
-                                
-                                # Add port and starboard soundings (one entry per ping, not two)
-                                if port_idx is not None:
-                                    det['y_port'].append(y_values[port_idx])
-                                    det['z_port'].append(z_values[port_idx])
-                                    det['bs_port'].append(bs_values[port_idx] if port_idx < len(bs_values) else 0)
-                                    det['rx_angle_port'].append(angle_values[port_idx] if port_idx < len(angle_values) else 0)
-                                else:
-                                    det['y_port'].append(0)
-                                    det['z_port'].append(0)
-                                    det['bs_port'].append(0)
-                                    det['rx_angle_port'].append(0)
-                                
-                                if stbd_idx is not None:
-                                    det['y_stbd'].append(y_values[stbd_idx])
-                                    det['z_stbd'].append(z_values[stbd_idx])
-                                    det['bs_stbd'].append(bs_values[stbd_idx] if stbd_idx < len(bs_values) else 0)
-                                    det['rx_angle_stbd'].append(angle_values[stbd_idx] if stbd_idx < len(angle_values) else 0)
-                                else:
-                                    det['y_stbd'].append(0)
-                                    det['z_stbd'].append(0)
-                                    det['bs_stbd'].append(0)
-                                    det['rx_angle_stbd'].append(0)
-                                
-                                # Add file info (one entry per ping)
-                                det['fname'].append(fname)
-                                
-                                # Add acquisition parameters (one entry per ping)
-                                det['ping_mode'].append(ping_info_data.get('depthMode', 0))
-                                det['pulse_form'].append(ping_info_data.get('pulseForm', 0))
-                                det['swath_mode'].append(ping_info_data.get('swathMode', 0))
-                                det['frequency'].append(ping_info_data.get('frequencyMode_Hz', 0))
-                                
-                                # Preserve runtime coverage limits so plotter runtime filters do not zero out archive data.
-                                # KMALL ping info can store starboard limits as negative values, so use absolute magnitudes.
-                                max_port_deg = abs(ping_info_data.get('portMeanCov_deg', 90))
-                                max_stbd_deg = abs(ping_info_data.get('stbdMeanCov_deg',
-                                                                        ping_info_data.get('starbMeanCov_deg', 90)))
-                                max_port_m = abs(ping_info_data.get('portMeanCov_m', 100000))
-                                max_stbd_m = abs(ping_info_data.get('stbdMeanCov_m',
-                                                                    ping_info_data.get('starbMeanCov_m', 100000)))
-                                
-                                det['max_port_deg'].append(max_port_deg)
-                                det['max_stbd_deg'].append(max_stbd_deg)
-                                det['max_port_m'].append(max_port_m)
-                                det['max_stbd_m'].append(max_stbd_m)
-                                
-                                # Add other required fields with default values (one entry per ping)
-                                for key in ['model', 'datetime', 'date', 'time', 'sn', 'max_port_deg', 'max_stbd_deg', 
-                                          'max_port_m', 'max_stbd_m', 'tx_x_m', 'tx_y_m', 'tx_z_m', 'tx_r_deg', 
-                                          'tx_p_deg', 'tx_h_deg', 'rx_x_m', 'rx_y_m', 'rx_z_m', 'rx_r_deg', 
-                                          'rx_p_deg', 'rx_h_deg', 'aps_num', 'aps_x_m', 'aps_y_m', 'aps_z_m', 
-                                          'wl_z_m', 'bytes']:
-                                    if key in ['max_port_deg', 'max_stbd_deg', 'max_port_m', 'max_stbd_m']:
-                                        continue
-                                    det[key].append(0)
 
-                    # Recover per-ping byte deltas for data-rate plotting.
-                    ping_count = len(det['y_port'])
-                    recovered_bytes = None
-                    if isinstance(data.get('start_byte'), list) and len(data['start_byte']) >= ping_count and ping_count > 0:
-                        try:
-                            start_bytes = np.asarray(data['start_byte'][:ping_count], dtype=float)
-                            recovered_bytes = [0.0] + np.diff(start_bytes).tolist()
-                            recovered_bytes = [max(0.0, b) for b in recovered_bytes]
-                        except Exception:
-                            recovered_bytes = None
-                    if recovered_bytes is None and 'XYZ' in data and isinstance(data['XYZ'], list):
-                        xyz_bytes = [entry.get('bytes_from_last_ping', 0) for entry in data['XYZ'][:ping_count]]
-                        if len(xyz_bytes) == ping_count:
-                            recovered_bytes = xyz_bytes
-                    if recovered_bytes is not None:
-                        det['bytes'] = recovered_bytes
-                    
-                    # Create the optimized data structure exactly like the plotter does
-                    optimized_data = {}
-                    
-                    # Copy essential fields for plotting (exactly like the plotter)
-                    essential_fields = [
-                        'fname', 'model', 'datetime', 'date', 'time', 'sn',
-                        'y_port', 'y_stbd', 'z_port', 'z_stbd', 
-                        'bs_port', 'bs_stbd', 'rx_angle_port', 'rx_angle_stbd',
-                        'ping_mode', 'pulse_form', 'swath_mode', 'frequency',
-                        'max_port_deg', 'max_stbd_deg', 'max_port_m', 'max_stbd_m',
-                        'tx_x_m', 'tx_y_m', 'tx_z_m', 'tx_r_deg', 'tx_p_deg', 'tx_h_deg',
-                        'rx_x_m', 'rx_y_m', 'rx_z_m', 'rx_r_deg', 'rx_p_deg', 'rx_h_deg',
-                        'aps_num', 'aps_x_m', 'aps_y_m', 'aps_z_m', 'wl_z_m',
-                        'bytes', 'fsize', 'fsize_wc'
-                    ]
-                    
-                    for field in essential_fields:
-                        if field in det:
-                            optimized_data[field] = det[field]
-                    
-                    # Ensure fname is set correctly - it should be a string, not a list
-                    if 'fname' in optimized_data and isinstance(optimized_data['fname'], list):
-                        # If fname is a list, take the first element
-                        optimized_data['fname'] = optimized_data['fname'][0] if optimized_data['fname'] else fname
-                    elif 'fname' not in optimized_data or optimized_data['fname'] is None:
-                        optimized_data['fname'] = fname
-                    
-                    # Add minimal XYZ data with only essential fields (like the plotter)
-                    if 'XYZ' in data:
-                        optimized_data['XYZ'] = []
-                        for xyz_entry in data['XYZ']:
-                            minimal_xyz = {
-                                'bytes_from_last_ping': xyz_entry.get('bytes_from_last_ping', 0),
-                                'z_reRefPoint_m': xyz_entry.get('z_reRefPoint_m', []),
-                                'y_reRefPoint_m': xyz_entry.get('y_reRefPoint_m', []),
-                                'x_reRefPoint_m': xyz_entry.get('x_reRefPoint_m', []),
-                                'deltaLatitude_deg': xyz_entry.get('deltaLatitude_deg', []),
-                                'deltaLongitude_deg': xyz_entry.get('deltaLongitude_deg', []),
-                                'detectionType': xyz_entry.get('detectionType', []),
-                                'reflectivity1_dB': xyz_entry.get('reflectivity1_dB', []),
-                                'beamAngleReRx_deg': xyz_entry.get('beamAngleReRx_deg', []),
-                                'PING_MODE': xyz_entry.get('PING_MODE', 0),
-                                'PULSE_FORM': xyz_entry.get('PULSE_FORM', 0),
-                                'FREQUENCY': xyz_entry.get('FREQUENCY', 'NA')
-                            }
-                            optimized_data['XYZ'].append(minimal_xyz)
-                    
-                    # Add essential HDR data required by interpretMode function (one per ping)
-                    optimized_data['HDR'] = []
-                    if 'HDR' in data and len(data['HDR']) > 0:
-                        for hdr_entry in data['HDR']:
-                            minimal_hdr = {
-                                'echoSounderID': hdr_entry.get('echoSounderID', 712),
-                                'dgdatetime': hdr_entry.get('dgdatetime', datetime.datetime.now())
-                            }
-                            optimized_data['HDR'].append(minimal_hdr)
-                    else:
-                        # Create HDR data with one entry per ping
-                        for _ in range(len(xyz_data)):
-                            minimal_hdr = {
-                                'echoSounderID': 712,
-                                'dgdatetime': datetime.datetime.now()
-                            }
-                            optimized_data['HDR'].append(minimal_hdr)
-                    
-                    # Add essential RTP data required by interpretMode function (one per ping)
-                    optimized_data['RTP'] = []
-                    if 'RTP' in data and len(data['RTP']) > 0:
-                        for rtp_entry in data['RTP']:
-                            minimal_rtp = {
-                                'depthMode': rtp_entry.get('depthMode', 0),
-                                'pulseForm': rtp_entry.get('pulseForm', 0)
-                            }
-                            optimized_data['RTP'].append(minimal_rtp)
-                    else:
-                        # Create RTP data with one entry per ping
-                        for _ in range(len(xyz_data)):
-                            minimal_rtp = {
-                                'depthMode': 0,
-                                'pulseForm': 0
-                            }
-                            optimized_data['RTP'].append(minimal_rtp)
-                    
-                    # Add essential IP data required by sortDetectionsCoverage
-                    if 'IP' in data:
-                        optimized_data['IP'] = {
-                            'install_txt': data['IP'].get('install_txt', ['SN=0,SWLZ=0,TRAI_TX1X=0;Y=0;Z=0;R=0;P=0;H=0,TRAI_RX1X=0;Y=0;Z=0;R=0;P=0;H=0'])
-                        }
-                    
-                    # Add essential IOP data required by sortDetectionsCoverage
-                    if 'IOP' in data:
-                        optimized_data['IOP'] = {
-                            'header': data['IOP'].get('header', [{'dgdatetime': datetime.datetime.now()}]),
-                            'runtime_txt': data['IOP'].get('runtime_txt', ['Max angle Port: 0\nMax angle Starboard: 0\nMax coverage Port: 0\nMax coverage Starboard: 0'])
-                        }
-                    
-                    # Ensure fname is properly set as a string (final fix)
-                    optimized_data['fname'] = str(fname)
-                    
-                    # Set fsize and fsize_wc as integers (not lists)
-                    optimized_data['fsize'] = fsize
-                    optimized_data['fsize_wc'] = fsize_wc
-                    
-                    # Preserve start_byte if available so bytes can be reconstructed at load time.
-                    if isinstance(data.get('start_byte'), list) and len(data['start_byte']) >= len(xyz_data):
-                        optimized_data['start_byte'] = data['start_byte'][:len(xyz_data)]
-                    else:
-                        optimized_data['start_byte'] = [0] * len(xyz_data)
-                    
-                    # Add cmnPart field (required by the plotter) - one per ping
-                    if 'cmnPart' in data:
-                        optimized_data['cmnPart'] = data['cmnPart']
-                    else:
-                        # Create cmnPart data with one entry per ping
-                        optimized_data['cmnPart'] = [0] * len(xyz_data)
-                    
-                    # Create the final data structure - the plotter expects the file data directly
-                    # with metadata, not nested under an index
-                    optimized_data['_pickle_metadata'] = {
-                        'source_file': fname,  # Use the actual filename
-                        'source_mtime': 0,
-                        'conversion_time': datetime.datetime.now().isoformat(),
-                        'version': '2.1',
-                        'optimized': True,
-                        'compressed': True
-                    }
-                    
-                    data_dict = optimized_data
-                    
-                    print(f"Successfully processed {len(xyz_data)} pings from {fname}")
-                    return data_dict
-                else:
-                    print("No XYZ data found in parsed file")
+            if not isinstance(data, dict) or 'XYZ' not in data:
+                print("Data is not a dictionary with XYZ - cannot process")
+                if isinstance(data, dict):
                     print(f"Available keys in data: {list(data.keys())}")
-                    return None
-            else:
-                print("Data is not a dictionary - cannot process")
                 return None
+
+            xyz_data = data['XYZ']
+            print(f"Found XYZ data with {len(xyz_data)} pings")
+            if not xyz_data:
+                print("No XYZ data found in parsed file")
+                return None
+
+            fname = data.get('fname', 'unknown')
+            if isinstance(fname, list) and len(fname) > 0:
+                fname = fname[0]
+            elif not isinstance(fname, str):
+                fname = str(fname)
+
+            fsize = data.get('fsize', 0)
+            fsize_wc = data.get('fsize_wc', np.nan)
+
+            # Recover per-ping byte deltas for data-rate plotting (match plotter).
+            if 'start_byte' in data:
+                ping_bytes = [0] + np.diff(data['start_byte']).tolist()
+                bytes_list = []
+                for p in range(len(xyz_data)):
+                    byte_val = ping_bytes[p] if p < len(ping_bytes) else 0
+                    data['XYZ'][p]['bytes_from_last_ping'] = byte_val
+                    bytes_list.append(byte_val)
+                data['bytes'] = bytes_list
+
+            det = self._build_archive_det_from_parsed(data)
+            if not det or len(det.get('y_port', [])) == 0:
+                print("No valid coverage detections found after sorting")
+                return None
+
+            for key, value in det.items():
+                data[key] = value
+
+            optimized_data = {}
+            essential_fields = [
+                'fname', 'model', 'datetime', 'date', 'time', 'sn',
+                'y_port', 'y_stbd', 'z_port', 'z_stbd',
+                'bs_port', 'bs_stbd', 'rx_angle_port', 'rx_angle_stbd',
+                'ping_mode', 'pulse_form', 'swath_mode', 'frequency',
+                'max_port_deg', 'max_stbd_deg', 'max_port_m', 'max_stbd_m',
+                'tx_x_m', 'tx_y_m', 'tx_z_m', 'tx_r_deg', 'tx_p_deg', 'tx_h_deg',
+                'rx_x_m', 'rx_y_m', 'rx_z_m', 'rx_r_deg', 'rx_p_deg', 'rx_h_deg',
+                'aps_num', 'aps_x_m', 'aps_y_m', 'aps_z_m', 'wl_z_m',
+                'bytes', 'fsize', 'fsize_wc'
+            ]
+
+            for field in essential_fields:
+                if field in data:
+                    optimized_data[field] = data[field]
+
+            optimized_data['fname'] = str(fname)
+            optimized_data['fsize'] = fsize
+            optimized_data['fsize_wc'] = fsize_wc
+
+            optimized_data['XYZ'] = []
+            for xyz_entry in data['XYZ']:
+                minimal_xyz = {
+                    'bytes_from_last_ping': xyz_entry.get('bytes_from_last_ping', 0),
+                    'z_reRefPoint_m': xyz_entry.get('z_reRefPoint_m', []),
+                    'y_reRefPoint_m': xyz_entry.get('y_reRefPoint_m', []),
+                    'x_reRefPoint_m': xyz_entry.get('x_reRefPoint_m', []),
+                    'deltaLatitude_deg': xyz_entry.get('deltaLatitude_deg', []),
+                    'deltaLongitude_deg': xyz_entry.get('deltaLongitude_deg', []),
+                    'detectionType': xyz_entry.get('detectionType', []),
+                    'reflectivity1_dB': xyz_entry.get('reflectivity1_dB', []),
+                    'beamAngleReRx_deg': xyz_entry.get('beamAngleReRx_deg', []),
+                    'PING_MODE': xyz_entry.get('PING_MODE', 0),
+                    'PULSE_FORM': xyz_entry.get('PULSE_FORM', 0),
+                    'FREQUENCY': xyz_entry.get('FREQUENCY', 'NA')
+                }
+                optimized_data['XYZ'].append(minimal_xyz)
+
+            if 'start_byte' in data:
+                optimized_data['start_byte'] = data['start_byte'][:len(xyz_data)]
+
+            optimized_data['HDR'] = []
+            if 'HDR' in data and len(data['HDR']) > 0:
+                for hdr_entry in data['HDR']:
+                    optimized_data['HDR'].append({
+                        'echoSounderID': hdr_entry.get('echoSounderID', 712),
+                        'dgdatetime': hdr_entry.get('dgdatetime', datetime.datetime.now())
+                    })
+            else:
+                for _ in range(len(xyz_data)):
+                    optimized_data['HDR'].append({
+                        'echoSounderID': 712,
+                        'dgdatetime': datetime.datetime.now()
+                    })
+
+            optimized_data['RTP'] = []
+            if 'RTP' in data and len(data['RTP']) > 0:
+                for rtp_entry in data['RTP']:
+                    optimized_data['RTP'].append({
+                        'depthMode': rtp_entry.get('depthMode', 0),
+                        'pulseForm': rtp_entry.get('pulseForm', 0)
+                    })
+            else:
+                for _ in range(len(xyz_data)):
+                    optimized_data['RTP'].append({'depthMode': 0, 'pulseForm': 0})
+
+            if 'IP' in data:
+                optimized_data['IP'] = {
+                    'install_txt': data['IP'].get(
+                        'install_txt',
+                        ['SN=0,SWLZ=0,TRAI_TX1X=0;Y=0;Z=0;R=0;P=0;H=0,TRAI_RX1X=0;Y=0;Z=0;R=0;P=0;H=0'])
+                }
+
+            if 'IOP' in data:
+                optimized_data['IOP'] = {
+                    'header': data['IOP'].get('header', [{'dgdatetime': datetime.datetime.now()}]),
+                    'runtime_txt': data['IOP'].get(
+                        'runtime_txt',
+                        ['Max angle Port: 0\nMax angle Starboard: 0\nMax coverage Port: 0\nMax coverage Starboard: 0'])
+                }
+
+            if 'cmnPart' in data:
+                optimized_data['cmnPart'] = data['cmnPart']
+            else:
+                optimized_data['cmnPart'] = [0] * len(xyz_data)
+
+            source_path = source_file if source_file else fname
+            source_mtime = os.path.getmtime(source_path) if source_file and os.path.exists(source_path) else 0
+            optimized_data['_pickle_metadata'] = {
+                'source_file': source_path,
+                'source_mtime': source_mtime,
+                'conversion_time': datetime.datetime.now().isoformat(),
+                'version': '2.1',
+                'optimized': True,
+                'compressed': self.use_compression
+            }
+
+            print(f"Successfully processed {len(xyz_data)} pings from {fname}")
+            return optimized_data
 
         except Exception as e:
             print(f"Error processing data for plotting: {e}")
@@ -908,6 +774,11 @@ class KMALLToPKLConverter(QMainWindow):
         last_compression = self.session_config.get('last_compression_setting', True)
         self.compression_checkbox.setChecked(last_compression)
         options_layout.addWidget(self.compression_checkbox)
+
+        self.save_index_checkbox = QCheckBox("Save Index File")
+        self.save_index_checkbox.setChecked(True)
+        self.save_index_checkbox.setToolTip("Keep .swathcov.idx sidecar files next to KMALL sources for faster re-indexing")
+        options_layout.addWidget(self.save_index_checkbox)
         
         self.overwrite_checkbox = QCheckBox("Overwrite existing PKL files")
         # Load last overwrite setting (default to False)
@@ -1207,7 +1078,8 @@ class KMALLToPKLConverter(QMainWindow):
             self.compression_checkbox.isChecked(),
             self.overwrite_checkbox.isChecked(),
             self.make_archive_checkbox.isChecked(),
-            archive_basename
+            archive_basename,
+            self.save_index_checkbox.isChecked()
         )
         
         self.worker.progress_updated.connect(self.update_progress)

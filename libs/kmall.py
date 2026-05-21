@@ -21,6 +21,12 @@ from scipy import stats
 
 import itertools
 
+# KMALL datagram: 4-byte total size + 16-byte header (type, version, time, ...)
+_KMALL_DGRAM_HEADER = struct.Struct('ccccBBHII')
+_KMALL_DGRAM_HEADER_SIZE = _KMALL_DGRAM_HEADER.size
+_KMALL_MIN_DGRAM_SIZE = 4 + _KMALL_DGRAM_HEADER_SIZE
+
+
 class kmall():
     """ A class for reading a Kongsberg KMALL data file. """
 
@@ -3268,7 +3274,10 @@ class kmall():
             print("%s:\t\t\t%s\n" % (k, str(v)))
 
     def index_file(self):
-        """ Index a KMALL file - message type, time, size, byte offset. """
+        """ Index a KMALL file - message type, time, size, byte offset.
+
+        Reads only each datagram header and seeks past the body (no full payload read).
+        """
 
         if self.FID is None:
             self.OpenFiletoRead()
@@ -3293,16 +3302,43 @@ class kmall():
         while self.FID.tell() < self.file_size:
 
             try:
-                # Get the byte offset.
-                self.msgoffset.append(self.FID.tell())
+                offset = self.FID.tell()
+                self.msgoffset.append(offset)
 
-                # Read the first four bytes to get the datagram size.
-                msgsize = struct.unpack("I", self.FID.read(4))
-                self.msgsize.append(msgsize[0])
+                size_bytes = self.FID.read(4)
+                if len(size_bytes) < 4:
+                    break
+                msgsize = struct.unpack("I", size_bytes)[0]
+                self.msgsize.append(msgsize)
 
-                # Read the datagram.
-                msg_buffer = self.FID.read(int(self.msgsize[self.pktcnt]) - 4)
-            except:
+                if msgsize < _KMALL_MIN_DGRAM_SIZE or offset + msgsize > self.file_size:
+                    raise struct.error("Invalid datagram size")
+
+                header_bytes = self.FID.read(_KMALL_DGRAM_HEADER_SIZE)
+                if len(header_bytes) < _KMALL_DGRAM_HEADER_SIZE:
+                    raise struct.error("Truncated datagram header")
+
+                (dgm_type0, dgm_type1, dgm_type2, dgm_type3, dgm_version,
+                 sysid, emid,
+                 sec,
+                 nsec) = _KMALL_DGRAM_HEADER.unpack(header_bytes)
+
+                dgm_type = dgm_type0 + dgm_type1 + dgm_type2 + dgm_type3
+
+                self.msgtype.append(str(dgm_type))
+                self.msgtime.append(sec + nsec / 1.0E9)
+
+                if self.verbose:
+                    print("MSG_TYPE: %s,\tOFFSET:%0.0f,\tSIZE: %0.0f,\tTIME: %0.3f" %
+                          (dgm_type,
+                           self.msgoffset[self.pktcnt],
+                           self.msgsize[self.pktcnt],
+                           self.msgtime[self.pktcnt]))
+
+                self.FID.seek(offset + msgsize, 0)
+                self.pktcnt += 1
+
+            except (struct.error, ValueError):
                 print("Error indexing file: %s at byte offset %d" % (self.filename, self.FID.tell()))
 
                 self.msgoffset = self.msgoffset[:-1]
@@ -3310,36 +3346,14 @@ class kmall():
                 self.scanToDatagram()
 
                 continue
+            except Exception:
+                print("Error indexing file: %s at byte offset %d" % (self.filename, self.FID.tell()))
 
-            # Interpret the header.
-            header_without_length = struct.Struct('ccccBBHII')
+                self.msgoffset = self.msgoffset[:-1]
+                self.msgsize = self.msgsize[:-1]
+                self.scanToDatagram()
 
-            (dgm_type0, dgm_type1, dgm_type2, dgm_type3, dgm_version,
-             sysid, emid,
-             sec,
-             nsec) = header_without_length.unpack_from(msg_buffer, 0)
-
-            dgm_type = dgm_type0 + dgm_type1 + dgm_type2 + dgm_type3
-
-            self.msgtype.append(str(dgm_type))
-            # Decode time
-            # osec = sec
-            # osec *= 1E9
-            # osec += nsec
-            # lisec = nanosec
-            # lisec /= 1E6
-
-            # Capture the datagram header timestamp.
-            self.msgtime.append(sec + nsec / 1.0E9)
-
-            if self.verbose:
-                print("MSG_TYPE: %s,\tOFFSET:%0.0f,\tSIZE: %0.0f,\tTIME: %0.3f" %
-                      (dgm_type,
-                       self.msgoffset[self.pktcnt],
-                       self.msgsize[self.pktcnt],
-                       self.msgtime[self.pktcnt]))
-
-            self.pktcnt += 1
+                continue
 
         self.msgoffset = np.array(self.msgoffset)
         self.msgsize = np.array(self.msgsize)
