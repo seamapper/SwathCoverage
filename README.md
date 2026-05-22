@@ -26,8 +26,10 @@ A standalone GUI application that converts Kongsberg multibeam data files (KMALL
 - **Batch Processing**: Convert multiple files at once
 - **Directory Support**: Add entire directories with optional recursive subdirectory search
 - **Archive Mode**: Optional `Make Archive PKL` mode creates a single archive PKL from all selected raw files
-- **Progress Tracking**: Real-time progress bar and status updates
+- **Progress Tracking**: Modal progress dialog with current file status during conversion
 - **Compression Support**: Optional gzip compression for 30-70% smaller files
+- **Fast Coverage-Only Read**: Uses the same optimized plot-mode KMALL reader as the plotter (outermost soundings only)
+- **Index Sidecar Cleanup**: Temporary `.swathcov.idx` index files are removed after each KMALL conversion
 - **Error Handling**: Comprehensive error reporting and logging
 - **File Validation**: Automatic detection of up-to-date files (skip if newer)
 
@@ -40,21 +42,26 @@ python kmall_to_pkl_converter.py
 
 **Method 2: Windows Executable**
 ```
-KMALL_to_SwathPKL_Converter_v2026.01.exe
+KMALL_to_SwathPKL_Converter_v2026.06.exe
 ```
 Executables are named `KMALL_to_SwathPKL_Converter_v` + version from the code.
+
+See also [KMALL_TO_PKL_README.md](KMALL_TO_PKL_README.md) for converter-specific options (overwrite, **Store files in SwathPKL Directory**, session settings, and archive mode details).
 
 **Basic Workflow:**
 1. Launch the application
 2. Add files using one of the following methods:
-   - Click "Select KMALL/ALL Files" to choose individual files
-   - Click "Select Directory" to add all KMALL/ALL files from a directory
-   - Enable "Include Subdirectories" checkbox to recursively search subdirectories
+   - Click **Select KMALL/ALL Files** to choose individual files
+   - Click **Select Directory** to add all KMALL/ALL files from a directory
+   - Enable **Include Subdirectories When Adding A Directory** to search subfolders recursively
 3. Choose an output directory for the converted PKL files
-4. Optionally enable compression for smaller file sizes
-5. Optional: enable **Make Archive PKL** to output one archive file instead of per-file PKLs
+4. Set options:
+   - **Enable compression** for smaller files (recommended)
+   - **Overwrite existing PKL files** to replace outputs, or leave off to skip up-to-date PKLs
+   - **Store files in SwathPKL Directory** to write PKLs into a `SwathPKL` subfolder under the output path
+5. Optional: enable **Make Archive PKL** to output one archive file instead of per-file Swath PKLs
 6. If archive mode is enabled, enter the archive basename when prompted
-7. Click "Start Conversion" and monitor progress
+7. Click **Start Conversion** and monitor the progress dialog and log
 
 ---
 
@@ -64,24 +71,29 @@ A comprehensive GUI application for analyzing and visualizing multibeam echosoun
 
 #### Key Features
 - **Multiple Data Sources**: Load raw KMALL/ALL files, Swath PKL files, or archived data
-  - Add Directory with optional subdirectory search for Swath PKL and Archive PKL
+  - Add Directory with optional **Include Subdirectories** for Raw, Swath PKL, and Archive PKL
   - Show Path toggle for each file list
-  - "Convert to Swath PKL" button with optional gzip compression
+  - Separate **Convert to Swath PKL** and **Convert to Archive PKL** groupboxes on the Raw tab
+- **Fast KMALL Processing**: Optional `.swathcov.idx` index sidecars, single-pass extraction, and plot-mode outermost-sounding reads
+- **Extract Timing** (optional): Parse SKM datagrams and show the Timing plot tab when enabled during coverage calculation
+- **Save Index** (optional): Keep KMALL index sidecars after **Calculate Coverage** for faster re-indexing; PKL conversion always removes sidecars
 - **Comprehensive Plotting**: Generate plots for depth, backscatter, ping mode, pulse form, swath mode, frequency, data rate, and timing
 - **Interactive Visualization**: Hover over data points to see the source filename in the status bar
 - **Coverage Trend Analysis**: Calculate, edit, digitize, and export swath coverage trends
 - **Data Filtering**: Filter by angle, depth, width, backscatter, ping interval, and runtime parameters
 - **Archive Management**: Archive processed data for later comparison
-- **Archive Conversion from Raw Files**: "Convert to Archive PKL" can auto-calculate coverage first when needed
-- **Archive Conversion from Swath PKL**: "Convert to Archive PKL" on the Swath PKL tab converts loaded Swath PKL data directly to one Archive PKL
+- **Archive Conversion from Raw Files**: **Convert to Archive PKL** can auto-calculate coverage first when needed
+- **Archive Conversion from Swath PKL**: **Convert to Archive PKL** on the Swath PKL tab converts loaded Swath PKL data directly to one Archive PKL
 - **Export Functionality**: Save all plots and export coverage trends (e.g., for Gap Filler)
 - **Analysis Group Export/Import**: Export plots + `settings.txt` + analysis JSON, then re-import sources and Plot/Filter settings; remembers parent directory and save name between sessions and repeated exports
 - **Enter-to-Commit Parameters**: Numeric fields apply on **Enter**; uncommitted edits show an amber/orange border
 - **Editable Filter Fields When Off**: Set filter/limit values before enabling a filter; inactive fields stay editable but visually dimmed
 - **Parameter Search**: Search acquisition parameters by mode, frequency, angles, and more
+- **Runtime Parameter Table**: Parameters tab shows an acquisition-parameter table with changed values highlighted vs. the previous row
 - **Theoretical Performance**: Overlay theoretical coverage specification curves
 - **Session Persistence**: Remember directory preferences and settings
 - **Dark Theme**: Fusion style with dark palette for consistent appearance
+- **Modal Progress Dialogs**: Calculate Coverage, Scan Parameters Only, PKL conversion, and PKL loading show a progress dialog with the current file; no persistent progress bars in the left panel
 
 #### Usage
 
@@ -92,23 +104,27 @@ python swath_coverage_plotter.py
 
 **Method 2: Windows Executable**
 ```
-Swath_Coverage_Plotter_v2026.11.exe
+Swath_Coverage_Plotter_v2026.12.exe
 ```
 Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 
 **Basic Workflow:**
 1. Launch the application
 2. Load data using one of the following methods:
-   - **Raw Files tab**: Add KMALL/ALL files and click "Calculate Coverage"
+   - **Raw tab**: Add KMALL/ALL files, optionally enable **Save Index** and **Extract Timing**, then click **Calculate Coverage**
    - **Swath PKL tab**: Load pre-converted PKL files (faster loading)
    - **Archive PKL tab**: Load previously archived data for comparison
-3. Optional archive creation paths:
-   - **Raw Files tab**: click **Convert to Archive PKL**; if coverage has not been calculated yet, the app will calculate coverage automatically before archiving
-   - **Swath PKL tab**: click **Convert to Archive PKL** to convert loaded Swath PKL data to a single archive (prompts for parent directory and archive basename)
-4. Configure plot settings on the **Plot** tab (colors, limits, point style, etc.)
-5. Apply filters on the **Filter** tab as needed (edit values first, then enable filters; press **Enter** in each field to commit)
-6. Explore plots across the nine center-panel tabs
-7. Use the **Trend** tab to calculate or digitize a coverage trend and export it
+3. Optional fast parameter scan (Raw tab only): click **Scan Parameters Only** after adding raw files
+4. Optional PKL conversion (Raw tab):
+   - **Convert to Swath PKL**: batch-convert raw files to compressed Swath PKL files
+   - **Convert to Archive PKL**: create an archive PKL; auto-calculates coverage first if needed
+5. Optional archive from loaded Swath PKL:
+   - **Swath PKL tab → Convert to Archive PKL** converts loaded Swath PKL data to a single archive (prompts for parent directory and archive basename)
+6. Configure plot settings on the **Plot** tab (colors, limits, point style, etc.)
+7. Apply filters on the **Filter** tab as needed (edit values first, then enable filters; press **Enter** in each field to commit)
+8. Explore plots across the center-panel tabs (some tabs are hidden depending on data source; see GUI Layout)
+9. Use the **Trend** tab to calculate or digitize a coverage trend and export it
+10. Use the **Search** tab to find parameter changes; results appear in the **Parameters** plot tab table when raw files are loaded
 
 ---
 
@@ -116,32 +132,35 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 
 ### Left Panel — Sources & Log
 - **Sources** groupbox (tabbed):
-  - *Raw Files*: file list, Raw File Management, Process Raw Files (Calculate Coverage, Scan Params Only, Convert to Swath PKL, Convert to Archive PKL)
-  - *Swath PKL*: file list, Swath PKL Management (Add/Remove/Clear/Add Directory, Convert to Archive PKL)
+  - *Raw*: **Raw Swath Sources** (file list, Add Files / Add Directory, **Include Subdirectories**, Remove Selected / Remove All Files, **Scan Parameters Only**); **Swath Coverage Calculation** (**Calculate Coverage** with **Save Index** and **Extract Timing**); **Convert to Swath PKL** (with **Enable compression**); **Convert to Archive PKL** (with **Enable compression**)
+  - *Swath PKL*: file list, Swath PKL Management (Add/Remove/Clear/Add Directory, Convert to Archive PKL, Include Subdirectories)
   - *Archive PKL*: file list, Archive PKL Management
   - *Spec Curve*: specification curve files
 - **Analysis & Plot Management** groupbox:
-  - **Export Analysis**: saves all plot images, `*_settings.txt`, and `*_analysis_group.json` (requires a cruise/description on the Plot tab). Remembers the last parent directory and save name for the next export in the same session or a later session.
+  - **Export Analysis**: saves all plot images, `*_settings.txt`, and `*_analysis_group.json` (requires a cruise/description on the Plot tab). Includes process settings such as **Save Index** and **Extract Timing**. Remembers the last parent directory and save name for the next export in the same session or a later session.
   - **Import Analysis Group**: loads saved source files and restores Plot/Filter/system settings from JSON
 - **Activity Log**: color-coded scrolling log
-- **Status / Progress** area:
-  - Current file label (updates during processing)
-  - Cursor label (shows hovered filename)
-  - *Total Progress* bar (used when loading PKL files)
-  - *Converting to PKL* bar (appears only while "Convert to Swath PKL" is running; shows "File X of Y")
+- **Status area**:
+  - **Cursor** label (shows hovered sounding filename)
 
-### Center Panel — Plots (9 tabs)
-| Tab | Content |
-|---|---|
-| Depth | Main swath coverage scatter plot, colored by depth |
-| Backscatter | Backscatter intensity scatter plot |
-| Ping Mode | Depth mode over time |
-| Pulse Form | CW vs. FM pulse form over time |
-| Swath Mode | Single vs. Dual swath over time |
-| Frequency | Operating frequency over time |
-| Data Rate | Data acquisition rate over time |
-| Timing | Ping interval / timing analysis |
-| Parameters | Runtime parameter log (searchable) |
+Long-running operations (**Calculate Coverage**, **Scan Parameters Only**, **Convert to Swath PKL**, **Convert to Archive PKL**, and Swath PKL loading) show a **modal progress dialog** with the current file. The dialog closes automatically when processing finishes.
+
+### Center Panel — Plots (up to 9 tabs; some hidden by data source)
+| Tab | Content | Visibility |
+|---|---|---|
+| Depth | Main swath coverage scatter plot, colored by depth | Always |
+| Backscatter | Backscatter intensity scatter plot | Always |
+| Ping Mode | Depth mode over time | Always |
+| Pulse Form | CW vs. FM pulse form over time | Always |
+| Swath Mode | Single vs. Dual swath over time | Always |
+| Frequency | Operating frequency over time | Always |
+| Data Rate | Data acquisition rate over time | Always |
+| Timing | Ping interval / timing analysis | Only when **Extract Timing** is enabled during raw-file coverage calculation |
+| Parameters | Runtime parameter search log header + table of parameter changes | Only when raw KMALL/ALL files are loaded in **Raw Swath Sources** |
+
+The **Parameters** tab shows acquisition parameter changes in a table (not a comma-separated text log). Rows are in chronological order. Cells that changed from the previous row are highlighted in amber; the first row is never highlighted. Use **Save Search Log** on the Search tab to export the table as CSV (or plain text with a CSV body).
+
+When only Swath PKL or Archive PKL data are loaded, the **Data Rate** and **Timing** plots display an on-plot notice that those metrics are not calculated from PKL/archive sources.
 
 ### Right Panel — Controls (4 tabs, 240 px wide)
 
@@ -210,7 +229,7 @@ Custom plot **depth** and **swath width** boxes are filled from the data extent 
 #### Search Tab
 - Search acquisition parameters (ANY/ALL condition) with checkable rows for depth mode, swath mode, pulse form, swath angle, swath coverage, frequency
 - Installation parameter search (waterline, array offsets, position offsets)
-- Update Search and Save Search Log buttons
+- **Update Search** and **Save Search Log** buttons (Save exports the Parameters table as CSV by default)
 
 ---
 
@@ -282,7 +301,7 @@ build_swath_coverage_exe.bat
 build_kmall_exe.bat
 ```
 
-Output is placed in the `dist/` folder, named with the current version (e.g., `Swath_Coverage_Plotter_v2026.03.exe`).
+Output is placed in the `dist/` folder, named with the current version (e.g., `Swath_Coverage_Plotter_v2026.12.exe`, `KMALL_to_SwathPKL_Converter_v2026.06.exe`).
 
 ---
 
@@ -318,8 +337,8 @@ The toolkit supports Kongsberg EM series multibeam systems:
 5. **Swath Mode**: Single vs. Dual swath operation
 6. **Frequency**: Operating frequency over time
 7. **Data Rate**: Data acquisition rate over time
-8. **Timing**: Ping interval and timing analysis
-9. **Parameters**: Runtime parameter log and search
+8. **Timing**: Ping interval and timing analysis (shown only when **Extract Timing** is enabled for raw-file processing)
+9. **Parameters**: Runtime parameter change table with highlighted diffs (shown only when raw KMALL/ALL files are loaded)
 
 ---
 
@@ -348,8 +367,13 @@ The **Trend** tab provides a full workflow for determining and exporting the swa
 ### For Large Datasets
 - **Use PKL Files**: Convert raw files to PKL format first for significantly faster loading
 - **Enable Compression**: Reduces file sizes by 30–70% with minimal performance impact
+- **Save Index** (Calculate Coverage): Keep `.swathcov.idx` sidecars next to KMALL files to speed up repeat coverage runs on the same raw data
+- **Extract Timing**: Leave off unless you need the Timing plot; SKM parsing adds processing time
 - **Limit Point Count**: Use the Filter tab "Limit plotted point count" option for faster rendering
 - **Apply Filters**: Reduce data before plotting using depth, angle, or width filters
+
+### KMALL Index Sidecars
+During **Calculate Coverage** or **Scan Parameters Only**, the reader can write a `.swathcov.idx` file next to each KMALL source when **Save Index** is enabled. These sidecars speed up re-indexing when the KMALL file has not changed. **Convert to Swath PKL** does not keep index sidecars—it removes them after each file is converted.
 
 ### For Batch Processing
 - Convert multiple files to PKL format using the KMALL to PKL Converter or the "Convert to Swath PKL" button in the plotter
@@ -398,6 +422,14 @@ The **Trend** tab provides a full workflow for determining and exporting the swa
 8. **Export Analysis asks for description**
    - Enter a cruise/description on the Plot tab before exporting
 
+9. **Data Rate or Timing plot shows a red PKL notice**
+   - Expected when loading Swath PKL or Archive PKL only; use raw KMALL/ALL files and **Calculate Coverage** for full data-rate and timing plots
+   - Enable **Extract Timing** before calculating coverage if you need the Timing tab for raw files
+
+10. **Parameters tab is missing**
+   - The Parameters plot tab appears only when raw `.all` / `.kmall` files are listed under **Raw Swath Sources**
+   - Use the **Search** tab to populate the Parameters table after raw data have been processed
+
 ### Getting Help
 
 1. Check the **Activity Log** in the left panel for detailed error messages
@@ -410,6 +442,7 @@ The **Trend** tab provides a full workflow for determining and exporting the swa
 ## Version History
 
 ### Swath Coverage Plotter
+- **v2026.12**: Raw tab UI reorganized (**Swath Coverage Calculation**, **Convert to Swath PKL**, **Convert to Archive PKL** groupboxes); **Scan Parameters Only**; **Include Subdirectories**; optional **Save Index** and **Extract Timing**; modal progress dialogs replace left-panel progress bars; **Parameters** tab table with change highlighting (hidden for Swath/Archive PKL-only loads); **Timing** tab hidden unless Extract Timing is enabled; fast KMALL index cache and plot-mode reads; PKL conversion aligned with coverage-only outermost-sounding pipeline
 - **v2026.11**: Enter-to-commit parameter fields with amber draft borders; filter/limit fields editable when groupboxes are off (inactive styling); custom plot depth/width limits auto-fill from data; Export Analysis remembers parent directory and save name between exports and sessions; single plot refresh after export; width filter included in debounced refresh; README and UI workflow documentation updates
 - **v2026.09**: Added Analysis & Plot Management workflow (Export Analysis / Import Analysis Group), full source-file path export in settings/JSON, expanded Plot tab state persistence on import/export (including swath-angle lines, water-depth-multiple lines, Other options, and single-color selections), and multiple plot layout/title refinements for GUI + export consistency
 - **v2026.03**: Fixed .all file loading (corrected `parseEM` import in `readALLswath`); fixed `last_depth_clim` crash on first plot with no valid data; fixed empty array crash in `plot_coverage`
@@ -427,6 +460,8 @@ The **Trend** tab provides a full workflow for determining and exporting the swa
 - **v2025.02**: New features, new swath PKL format, GUI redesign
 
 ### KMALL to PKL Converter
+- **v2026.06**: Version bump; plot-mode coverage-only reads; index sidecars removed after conversion; no Save Index option (index files are always cleaned up after conversion)
+- **v2026.05**: Plot-mode coverage-only KMALL read; index sidecars removed after conversion; modal progress dialog; aligned with plotter Swath PKL format
 - **v2026.01**: Dark theme (Fusion + dark palette); executable naming `KMALL_to_SwathPKL_Converter_v` + version
 - **v2025.02**: Added subdirectory search option
 - **v2025.01**: Initial release — GUI interface, batch processing, compression support, progress tracking, error handling

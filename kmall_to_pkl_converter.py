@@ -15,7 +15,7 @@ Features:
 
 Author: Paul Johnson
 """
-__version__ = "2026.05"  
+__version__ = "2026.06"  
 
 import sys
 import os
@@ -116,7 +116,7 @@ class ConversionWorker(QThread):
     error_occurred = pyqtSignal(str)  # error message
     
     def __init__(self, input_files, output_dir, use_compression=True, overwrite_existing=False,
-                 make_archive=False, archive_basename="", save_index_file=True):
+                 make_archive=False, archive_basename=""):
         super().__init__()
         self.input_files = input_files
         self.output_dir = output_dir
@@ -124,11 +124,10 @@ class ConversionWorker(QThread):
         self.overwrite_existing = overwrite_existing
         self.make_archive = make_archive
         self.archive_basename = archive_basename
-        self.save_index_file = save_index_file
         self.cancelled = False
 
-    def _cleanup_index_if_disabled(self, source_file):
-        if not self.save_index_file and str(source_file).lower().endswith('.kmall'):
+    def _cleanup_kmall_index(self, source_file):
+        if str(source_file).lower().endswith('.kmall'):
             remove_kmall_index_cache(source_file)
     
     def run(self):
@@ -200,12 +199,12 @@ class ConversionWorker(QThread):
                                 self.progress_updated.emit(i + 1, 
                                                          f"Converted {filename} in {conversion_time:.2f}s "
                                                          f"({input_size/(1024*1024):.1f}MB → output file not found)")
-                            self._cleanup_index_if_disabled(input_file)
+                            self._cleanup_kmall_index(input_file)
                         else:
                             results['failed'] += 1
                             results['errors'].append(f"Failed to convert {filename}")
                             self.progress_updated.emit(i + 1, f"Failed to convert {filename} (after {conversion_time:.2f}s)")
-                            self._cleanup_index_if_disabled(input_file)
+                            self._cleanup_kmall_index(input_file)
                             
                     except Exception as e:
                         # Calculate time even for failed conversions
@@ -216,7 +215,7 @@ class ConversionWorker(QThread):
                         error_msg = f"Error converting {filename} (after {conversion_time:.2f}s): {str(e)}"
                         results['errors'].append(error_msg)
                         self.progress_updated.emit(i + 1, error_msg)
-                        self._cleanup_index_if_disabled(input_file)
+                        self._cleanup_kmall_index(input_file)
                         print(f"Detailed error for {filename}: {e}")
                         import traceback
                         traceback.print_exc()
@@ -332,11 +331,11 @@ class ConversionWorker(QThread):
                     self.progress_updated.emit(i + 1, f"Added {filename} to archive")
                 else:
                     self.progress_updated.emit(i + 1, f"Skipped {filename} (no valid detections)")
-                self._cleanup_index_if_disabled(input_file)
+                self._cleanup_kmall_index(input_file)
             
             except Exception as e:
                 self.progress_updated.emit(i + 1, f"Failed {filename}: {str(e)}")
-                self._cleanup_index_if_disabled(input_file)
+                self._cleanup_kmall_index(input_file)
         
         if converted_files == 0:
             return None
@@ -456,7 +455,7 @@ class ConversionWorker(QThread):
             # Coverage PKLs need outermost soundings only (same fast path as the plotter).
             data = readKMALLswath(self, filename, print_updates=True,
                                   include_skm=False, parse_params_only=False,
-                                  read_mode='plot', save_index_file=self.save_index_file)
+                                  read_mode='plot', save_index_file=False)
             
             # Add file size information
             data['fsize'] = os.path.getsize(filename)
@@ -774,11 +773,6 @@ class KMALLToPKLConverter(QMainWindow):
         last_compression = self.session_config.get('last_compression_setting', True)
         self.compression_checkbox.setChecked(last_compression)
         options_layout.addWidget(self.compression_checkbox)
-
-        self.save_index_checkbox = QCheckBox("Save Index File")
-        self.save_index_checkbox.setChecked(True)
-        self.save_index_checkbox.setToolTip("Keep .swathcov.idx sidecar files next to KMALL sources for faster re-indexing")
-        options_layout.addWidget(self.save_index_checkbox)
         
         self.overwrite_checkbox = QCheckBox("Overwrite existing PKL files")
         # Load last overwrite setting (default to False)
@@ -1078,8 +1072,7 @@ class KMALLToPKLConverter(QMainWindow):
             self.compression_checkbox.isChecked(),
             self.overwrite_checkbox.isChecked(),
             self.make_archive_checkbox.isChecked(),
-            archive_basename,
-            self.save_index_checkbox.isChecked()
+            archive_basename
         )
         
         self.worker.progress_updated.connect(self.update_progress)

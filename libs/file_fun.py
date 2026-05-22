@@ -293,7 +293,11 @@ def update_log(self, entry, font_color='black'):  # update the activity log
 
 
 def update_prog(self, total_prog):
-	self.calc_pb.setValue(total_prog)
+	dialog = getattr(self, '_processing_progress_dialog', None)
+	if dialog is not None:
+		dialog.setValue(total_prog)
+	elif hasattr(self, 'calc_pb'):
+		self.calc_pb.setValue(total_prog)
 	QtWidgets.QApplication.processEvents()
 
 

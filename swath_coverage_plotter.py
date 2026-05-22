@@ -339,8 +339,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.param_search_btn.clicked.connect(lambda: update_param_search(self))
         self.save_param_log_btn.clicked.connect(lambda: save_param_log(self))
         self.scan_params_btn.clicked.connect(lambda: calc_coverage(self, params_only=True))
-        self.save_index_chk.toggled.connect(lambda checked: sync_save_index_checkboxes(self, self.save_index_chk))
-        self.save_index_pkl_chk.toggled.connect(lambda checked: sync_save_index_checkboxes(self, self.save_index_pkl_chk))
 
         # Set up event actions that call refresh_plot
         gb_map = [self.custom_info_gb,
@@ -899,6 +897,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # File removal and data management buttons
         self.rmv_file_btn = PushButton('Remove Selected', btnw, btnh, 'rmv_file_btn', 'Remove selected files')
         self.clr_file_btn = PushButton('Remove All Files', btnw, btnh, 'clr_file_btn', 'Remove all files')
+        for raw_source_btn in (self.add_file_btn, self.get_indir_btn, self.rmv_file_btn, self.clr_file_btn):
+            raw_source_btn.setMinimumWidth(0)
+            raw_source_btn.setMaximumWidth(16777215)
+            raw_source_btn.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
         self.archive_data_btn = PushButton('Convert to Archive PKL', btnw, btnh, 'archive_data_btn',
                                            'Archive current data from new files to a .pkl file')
         self.archive_data_btn.setEnabled(False)  # Enable only after coverage has been calculated
@@ -915,8 +917,6 @@ class MainWindow(QtWidgets.QMainWindow):
                                                'Include subdirectories when adding a directory of PKL files')
         self.convert_pickle_btn = PushButton('Convert to Swath PKL', btnw, btnh, 'convert_pickle_btn',
                                              'Convert source files to optimized pickle files for faster loading')
-        self.save_index_pkl_chk = CheckBox('Save Index File', True, 'save_index_pkl_chk',
-                                           'Keep .swathcov.idx sidecar files next to KMALL sources for faster re-indexing')
         self.swath_pkl_compression_chk = CheckBox('Enable compression', True, 'swath_pkl_compression_chk',
                                                   'Enable gzip compression for Swath PKL files (30-70% smaller)')
         
@@ -928,13 +928,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.calc_coverage_btn = PushButton('Calculate Coverage', btnw, btnh, 'calc_coverage_btn',
                                             'Calculate coverage from loaded files')
         self.calc_coverage_btn.setEnabled(False)  # Disable on startup until files are loaded
-        self.save_index_chk = CheckBox('Save Index File', True, 'save_index_chk',
+        self.save_index_chk = CheckBox('Save Index', True, 'save_index_chk',
                                        'Keep .swathcov.idx sidecar files next to KMALL sources for faster re-indexing')
         self.extract_timing_chk = CheckBox('Extract Timing', False, 'extract_timing_chk',
                                            'Parse SKM attitude datagrams and show the Timing plot tab')
         
         # Parameter scanning button (fast mode)
-        self.scan_params_btn = PushButton('Scan Params Only', btnw, btnh, 'scan_params_btn',
+        self.scan_params_btn = PushButton('Scan Parameters Only', btnw, btnh, 'scan_params_btn',
                                             'Scan acquisition parameters ONLY for loaded files\n\n'
                                             'This can be orders of magnitude faster than parsing full coverage data\n\n'
                                             'See the Parameters and Search tabs for history and search options\n\n'
@@ -943,6 +943,9 @@ class MainWindow(QtWidgets.QMainWindow):
                                             'Runtime and installation parameter data will be assigned to the first '
                                             'ping time following any parameter changes')
         self.scan_params_btn.setEnabled(False)  # Disable on startup until files are loaded
+        self.scan_params_btn.setMinimumWidth(0)
+        self.scan_params_btn.setMaximumWidth(16777215)
+        self.scan_params_btn.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
         
         # Export and save buttons
         self.save_all_plots_btn = PushButton('Export Analysis', btnw, btnh, 'save_all_plots_btn',
@@ -994,41 +997,54 @@ class MainWindow(QtWidgets.QMainWindow):
         raw_swath_widget = QtWidgets.QWidget()
         raw_swath_layout = QtWidgets.QVBoxLayout()
         
-        # Raw swath files buttons
-        raw_swath_btn_layout = BoxLayout([self.add_file_btn, self.get_indir_btn, self.rmv_file_btn,
-                                         self.clr_file_btn, self.include_subdir_chk], 'v')
-        raw_swath_btn_gb = GroupBox('Raw File Management', raw_swath_btn_layout, False, False, 'raw_swath_btn_gb')
-        
         # Process swath files buttons - group related buttons and checkboxes
-        swath_pkl_group_layout = BoxLayout([self.convert_pickle_btn, self.save_index_pkl_chk, self.swath_pkl_compression_chk], 'v')
-        archive_group_layout = BoxLayout([self.archive_data_btn, self.archive_compression_chk], 'v')
-        process_btn_layout = BoxLayout([self.calc_coverage_btn, self.save_index_chk, self.extract_timing_chk, self.scan_params_btn, swath_pkl_group_layout, archive_group_layout], 'v')
-        process_btn_gb = GroupBox('Process Raw Files', process_btn_layout, False, False, 'process_btn_gb')
+        calc_coverage_row = QtWidgets.QHBoxLayout()
+        calc_coverage_row.addWidget(self.calc_coverage_btn, 1)
+        calc_coverage_row.addWidget(self.save_index_chk, 1)
+        extract_timing_row = QtWidgets.QHBoxLayout()
+        extract_timing_row.addStretch(1)
+        extract_timing_row.addWidget(self.extract_timing_chk, 1)
+        swath_pkl_group_layout = BoxLayout([self.convert_pickle_btn, self.swath_pkl_compression_chk], 'h')
+        archive_group_layout = QtWidgets.QHBoxLayout()
+        archive_group_layout.addWidget(self.archive_data_btn, 1)
+        archive_group_layout.addWidget(self.archive_compression_chk, 1)
+        process_btn_layout = BoxLayout([calc_coverage_row, extract_timing_row], 'v')
+        process_btn_gb = GroupBox('Swath Coverage Calculation', process_btn_layout, False, False, 'process_btn_gb')
+        convert_swath_pkl_gb = GroupBox('Convert to Swath PKL', swath_pkl_group_layout, False, False, 'convert_swath_pkl_gb')
+        convert_archive_pkl_gb = GroupBox('Convert to Archive PKL', archive_group_layout, False, False, 'convert_archive_pkl_gb')
         
         # Show path checkbox for raw swath sources
         self.show_path_chk = CheckBox('Show Path', False, 'show_path_chk',
                                       'Show full file path along with filename in the file list')
         
-        # Swath sources file list with show path checkbox
+        # Swath sources file list with show path checkbox and file controls
         swath_sources_layout = QtWidgets.QVBoxLayout()
         swath_sources_layout.addWidget(self.file_list)
         swath_sources_layout.addWidget(self.show_path_chk)
+        raw_add_layout = QtWidgets.QHBoxLayout()
+        raw_add_layout.addWidget(self.add_file_btn, 1)
+        raw_add_layout.addWidget(self.get_indir_btn, 1)
+        raw_remove_layout = QtWidgets.QHBoxLayout()
+        raw_remove_layout.addWidget(self.rmv_file_btn, 1)
+        raw_remove_layout.addWidget(self.clr_file_btn, 1)
+        raw_include_subdir_layout = QtWidgets.QHBoxLayout()
+        raw_include_subdir_layout.addStretch(1)
+        raw_include_subdir_layout.addWidget(self.include_subdir_chk)
+        raw_sources_controls_layout = BoxLayout([raw_add_layout, raw_include_subdir_layout, raw_remove_layout, self.scan_params_btn], 'v')
+        swath_sources_layout.addLayout(raw_sources_controls_layout)
         swath_sources_gb = GroupBox('Raw Swath Sources', swath_sources_layout, False, False, 'swath_sources_gb')
         
         # Connect show path checkbox signal after it's created
         self.show_path_chk.toggled.connect(self.toggle_file_path_display)
         
-        # Create horizontal layout for File Management and Process Raw Files
-        file_process_layout = QtWidgets.QHBoxLayout()
-        file_process_layout.addWidget(raw_swath_btn_gb)
-        file_process_layout.addWidget(process_btn_gb)
-        
         # Combine raw swath components
         raw_swath_layout.addWidget(swath_sources_gb, 1)  # Give file list more space
-        raw_swath_layout.addLayout(file_process_layout, 0)  # Minimal space for buttons
+        raw_swath_layout.addWidget(process_btn_gb, 0)  # Minimal space for buttons
+        raw_swath_layout.addWidget(convert_swath_pkl_gb, 0)
+        raw_swath_layout.addWidget(convert_archive_pkl_gb, 0)
         raw_swath_layout.addStretch()
         raw_swath_widget.setLayout(raw_swath_layout)
-        self.sources_tab_widget.addTab(raw_swath_widget, "Raw Files")
+        self.sources_tab_widget.addTab(raw_swath_widget, "Raw")
         
         # TAB 2: Swath PKL
         swath_pkl_widget = QtWidgets.QWidget()
@@ -1124,34 +1140,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.update_log('*** New swath coverage processing log ***', 'blue')
         log_gb = GroupBox('Activity Log', BoxLayout([self.log], 'v'), False, False, 'log_gb')
 
-        # Create progress tracking and status display widgets
-        self.current_file_lbl = Label('Current file:')
+        # Create status display widgets
         self.sounding_file_lbl = Label('Cursor: ' + self.sounding_fname_default)
-        
-        # Progress bar for overall processing
-        calc_pb_lbl = Label('Total Progress:')
-        self.calc_pb = QtWidgets.QProgressBar()
-        self.calc_pb.setGeometry(0, 0, 150, 30)
-        self.calc_pb.setMaximum(100)  # this will update with number of files
-        self.calc_pb.setValue(0)
-        calc_pb_layout = BoxLayout([calc_pb_lbl, self.calc_pb], 'h')
-
-        # Progress bar for KMALL/PKL conversion
-        self.convert_pb_lbl = Label('Converting to PKL:')
-        self.convert_pb = QtWidgets.QProgressBar()
-        self.convert_pb.setGeometry(0, 0, 150, 30)
-        self.convert_pb.setMaximum(100)
-        self.convert_pb.setValue(0)
-        self.convert_pb.setFormat("File %v of %m")
-        self.convert_pb.setTextVisible(True)
-        convert_pb_layout = BoxLayout([self.convert_pb_lbl, self.convert_pb], 'h')
-        self.convert_pb_lbl.setVisible(False)
-        self.convert_pb.setVisible(False)
-
-        # Combine status information and progress bars
-        self.prog_layout = BoxLayout([self.current_file_lbl, self.sounding_file_lbl], 'v')
-        self.prog_layout.addLayout(calc_pb_layout)
-        self.prog_layout.addLayout(convert_pb_layout)
+        self.prog_layout = BoxLayout([self.sounding_file_lbl], 'v')
 
         # Set the left panel layout with file controls on top, export trend, log, and progress on bottom
         # Sources area gets 75% of space, export trend and activity log get 25%
@@ -1178,6 +1169,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.calc_coverage_btn.setEnabled(has_source_files)
         self.scan_params_btn.setEnabled(has_source_files)
         self.convert_pickle_btn.setEnabled(has_source_files)
+        
+        update_parameters_tab_visibility(self)
         
         # Update Save All Plots button color based on data availability
         self.update_save_plots_button_color()
@@ -1563,11 +1556,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self.y_max_time = 0.0
         self.time_layout = BoxLayout([self.time_toolbar, self.time_canvas], 'v')
 
-        # Parameter log widget for the Parameters tab
-        self.param_log = TextEdit("background-color: lightgray", True, 'log')
-        self.param_log.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding, QtWidgets.QSizePolicy.Policy.MinimumExpanding)
-        update_param_log(self, '*** New acquisition parameter log ***')
-        param_log_gb = GroupBox('Runtime Parameter Log', BoxLayout([self.param_log], 'v'), False, False, 'param_log_gb')
+        # Parameter log/table widgets for the Parameters tab
+        self.param_log_header = TextEdit("background-color: lightgray", True, 'param_log_header')
+        self.param_log_header.setMaximumHeight(120)
+        self.param_log_header.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                                            QtWidgets.QSizePolicy.Policy.Fixed)
+        update_param_log_header(self, '*** New acquisition parameter log ***')
+
+        self.param_table = QtWidgets.QTableWidget()
+        self.param_table.setObjectName('param_table')
+        self.param_table.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                                       QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        configure_param_table(self)
+
+        param_view_layout = QtWidgets.QVBoxLayout()
+        param_view_layout.setContentsMargins(0, 0, 0, 0)
+        param_view_layout.addWidget(self.param_log_header)
+        param_view_layout.addWidget(self.param_table, 1)
+        param_log_gb = GroupBox('Runtime Parameter Log', param_view_layout, False, False, 'param_log_gb')
         self.param_layout = BoxLayout([param_log_gb], 'v')
 
         # set up tabs
@@ -1640,8 +1646,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plot_tabs.addTab(self.plot_tab8, 'Timing')
         self.plot_tabs.addTab(self.plot_tab9, 'Parameters')
         self.timing_tab_index = self.plot_tabs.indexOf(self.plot_tab8)
+        self.parameters_tab_index = self.plot_tabs.indexOf(self.plot_tab9)
         self.extract_timing_chk.toggled.connect(lambda: update_timing_tab_visibility(self))
         update_timing_tab_visibility(self)
+        update_parameters_tab_visibility(self)
 
         self.center_layout = BoxLayout([self.plot_tabs], 'v')
         # self.center_layout.addStretch()
@@ -2869,35 +2877,38 @@ class MainWindow(QtWidgets.QMainWindow):
             if pkl_files:  # Only invalidate if we have files to process
                 self._invalidate_decimation_cache()
 
-            # Initialize progress bar to show "current / total files"
             total_files = len(pkl_files)
-            if hasattr(self, 'calc_pb'):
-                try:
-                    self.calc_pb.setVisible(True)
-                except Exception:
-                    pass
-                self.calc_pb.setMaximum(total_files)
-                self.calc_pb.setValue(0)
-                try:
-                    self.calc_pb.setFormat("%v / %m files")
-                    self.calc_pb.setTextVisible(True)
-                except Exception:
-                    pass
+            try:
+                from .libs.swath_coverage_lib import (
+                    open_processing_progress_dialog,
+                    update_processing_progress,
+                    close_processing_progress_dialog,
+                )
+            except ImportError:
+                from libs.swath_coverage_lib import (
+                    open_processing_progress_dialog,
+                    update_processing_progress,
+                    close_processing_progress_dialog,
+                )
+
+            if total_files > 0:
+                open_processing_progress_dialog(
+                    self,
+                    "Loading Swath PKL",
+                    "Loading Swath PKL files...",
+                    total_files
+                )
             
             # Process each PKL file using the same logic as load_swath_pkl
             for i, pickle_file in enumerate(pkl_files):
                 filename = os.path.basename(pickle_file)
-                if hasattr(self, 'calc_pb'):
-                    self.calc_pb.setValue(i + 1)
-                if hasattr(self, 'current_file_lbl'):
-                    try:
-                        self.current_file_lbl.setText(f"Loading: {filename}")
-                    except Exception:
-                        pass
-                try:
-                    QtWidgets.QApplication.processEvents()
-                except Exception:
-                    pass
+                if update_processing_progress(
+                    self,
+                    i,
+                    f"Current file [{i + 1}/{total_files}]: {filename}"
+                ):
+                    self.update_log("Loading cancelled by user.")
+                    break
                 try:
                     from .libs.swath_coverage_lib import load_pickle_file
                 except ImportError:
@@ -3004,14 +3015,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 import traceback
                 self.update_log(f"Traceback: {traceback.format_exc()}")
         finally:
-            # Finalize progress bar
-            if pkl_files and hasattr(self, 'calc_pb'):
-                self.calc_pb.setValue(len(pkl_files))
-            if hasattr(self, 'current_file_lbl'):
-                try:
-                    self.current_file_lbl.setText("Current file:")
-                except Exception:
-                    pass
+            try:
+                from .libs.swath_coverage_lib import close_processing_progress_dialog
+            except ImportError:
+                from libs.swath_coverage_lib import close_processing_progress_dialog
+            close_processing_progress_dialog(self)
             # End operation logging
             if hasattr(self, 'end_operation_log'):
                 self.end_operation_log("Loading Swath Pickle Files")

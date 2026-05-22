@@ -68,6 +68,46 @@ import json
 from matplotlib.colors import ListedColormap
 
 
+def open_processing_progress_dialog(self, title, initial_text, maximum, show_cancel=True):
+    """Show a modal progress dialog for long-running file processing."""
+    maximum = max(1, int(maximum))
+    cancel_label = "Cancel" if show_cancel else None
+    dialog = QtWidgets.QProgressDialog(initial_text, cancel_label, 0, maximum, self)
+    dialog.setWindowTitle(title)
+    dialog.setWindowModality(Qt.WindowModality.WindowModal)
+    dialog.setAutoClose(False)
+    dialog.setAutoReset(False)
+    dialog.setMinimumDuration(0)
+    if not show_cancel:
+        dialog.setCancelButton(None)
+    dialog.setValue(0)
+    dialog.show()
+    QtWidgets.QApplication.processEvents()
+    self._processing_progress_dialog = dialog
+    return dialog
+
+
+def update_processing_progress(self, value, label_text=None):
+    """Update the active processing progress dialog. Returns True if cancelled."""
+    dialog = getattr(self, '_processing_progress_dialog', None)
+    if dialog is None:
+        return False
+    dialog.setValue(value)
+    if label_text is not None:
+        dialog.setLabelText(label_text)
+    QtWidgets.QApplication.processEvents()
+    return dialog.wasCanceled()
+
+
+def close_processing_progress_dialog(self):
+    """Close and clear the active processing progress dialog."""
+    dialog = getattr(self, '_processing_progress_dialog', None)
+    if dialog is not None:
+        dialog.close()
+        dialog.deleteLater()
+        self._processing_progress_dialog = None
+
+
 def load_session_config():
     """
     Load session configuration including last used directories.
@@ -297,6 +337,8 @@ def update_button_states(self):
         # If coverage does not yet exist, archive_data() will auto-calculate it first.
         self.archive_data_btn.setEnabled(has_source_files or has_coverage_data)
 
+    update_parameters_tab_visibility(self)
+
 def _format_coord_3dec(ax_default_format_coord):
     """Return a formatter that shows x,y with 3 decimal places for the toolbar (avoids scientific notation)."""
     def formatter(x, y):
@@ -486,8 +528,6 @@ def remove_cov_files(self, clear_all=False):
         self.det_archive = {}
         self.spec = {}
         update_log(self, 'Cleared all files')
-        self.current_file_lbl.setText('Current File [0/0]:')
-        self.calc_pb.setValue(0)
         self.cruise_name_updated = False
         self.model_updated = False
         self.ship_name_updated = False
@@ -582,12 +622,39 @@ def update_timing_tab_visibility(self):
         self.plot_tabs.setCurrentIndex(0)
 
 
+def has_raw_swath_sources(self):
+    """Return True when raw .all/.kmall files are listed in Raw Swath Sources."""
+    if hasattr(self, 'file_list'):
+        for i in range(self.file_list.count()):
+            item = self.file_list.item(i)
+            if not item:
+                continue
+            text = item.text().replace('\\', '/')
+            basename = os.path.basename(text).lower()
+            if basename.endswith(('.all', '.kmall')):
+                return True
+
+    return any(
+        isinstance(fname, str) and fname.lower().endswith(('.all', '.kmall'))
+        for fname in getattr(self, 'filenames', [])
+        if fname and fname.strip()
+    )
+
+
+def update_parameters_tab_visibility(self):
+    """Show Parameters tab only when raw swath source files are loaded."""
+    if not hasattr(self, 'plot_tabs') or not hasattr(self, 'parameters_tab_index'):
+        return
+    show_parameters = has_raw_swath_sources(self)
+    self.plot_tabs.setTabVisible(self.parameters_tab_index, show_parameters)
+    if not show_parameters and self.plot_tabs.currentIndex() == self.parameters_tab_index:
+        self.plot_tabs.setCurrentIndex(0)
+
+
 def save_index_file_enabled(self):
-    """Return whether KMALL index sidecars should be kept on disk."""
+    """Return whether KMALL index sidecars should be kept on disk after Calculate Coverage."""
     if hasattr(self, 'save_index_chk'):
         return self.save_index_chk.isChecked()
-    if hasattr(self, 'save_index_pkl_chk'):
-        return self.save_index_pkl_chk.isChecked()
     return True
 
 
@@ -603,19 +670,6 @@ def cleanup_kmall_indexes_if_disabled(self, kmall_paths):
         return
     for kmall_path in kmall_paths:
         cleanup_kmall_index_if_disabled(self, kmall_path)
-
-
-def sync_save_index_checkboxes(self, source_checkbox):
-    """Keep Save Index File checkboxes in Process Raw Files and PKL sections aligned."""
-    if not hasattr(self, 'save_index_chk') or not hasattr(self, 'save_index_pkl_chk'):
-        return
-    checked = source_checkbox.isChecked()
-    for checkbox in (self.save_index_chk, self.save_index_pkl_chk):
-        if checkbox is source_checkbox:
-            continue
-        checkbox.blockSignals(True)
-        checkbox.setChecked(checked)
-        checkbox.blockSignals(False)
 
 
 def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_filters=True):
@@ -1839,225 +1893,243 @@ def calc_coverage(self, params_only=False):
         param_new = {}
         self.skm_time = {}
 
-        # update progress bar and log
-        self.calc_pb.setValue(0)  # reset progress bar to 0 and max to number of files
-        self.calc_pb.setMaximum(max([1, len(fnames_new)]))  # set max value to at least 1 to avoid hanging when 0/0
+        progress_title = "Parameter Scanning" if params_only else "Coverage Calculation"
+        progress_prefix = 'Scanning parameters' if params_only else 'Calculating coverage'
+        if num_new_files > 0:
+            open_processing_progress_dialog(
+                self,
+                progress_title,
+                f'{progress_prefix}...',
+                num_new_files
+            )
 
-        i = 0  # counter for successfully parsed files (data_new index)
-        f = 0  # placeholder if no fnames_new
-        kmall_paths_attempted = []
+        try:
+            i = 0  # counter for successfully parsed files (data_new index)
+            f = 0  # placeholder if no fnames_new
+            kmall_paths_attempted = []
 
-        tic1 = process_time()
+            tic1 = process_time()
 
-        for f in range(len(fnames_new)):
-            print('in calc_coverage, f =', f)
-            fname_str = fnames_new[f].rsplit('/')[-1]
-            self.current_file_lbl.setText('Parsing new file [' + str(f+1) + '/' + str(num_new_files) + ']:' + fname_str)
-            QtWidgets.QApplication.processEvents()
-            ftype = fname_str.rsplit('.', 1)[-1]
+            for f in range(len(fnames_new)):
+                print('in calc_coverage, f =', f)
+                fname_str = fnames_new[f].rsplit('/')[-1]
+                if update_processing_progress(
+                    self,
+                    f,
+                    f'Current file [{f + 1}/{num_new_files}]: {fname_str}'
+                ):
+                    update_log(self, 'Processing cancelled by user.')
+                    break
+                ftype = fname_str.rsplit('.', 1)[-1]
 
-            # Log progress with enhanced logging if available
-            if hasattr(self, 'log_progress'):
-                self.log_progress(f + 1, num_new_files, f"Parsing {ftype.upper()} files")
-            else:
-                update_log(self, f"Processing file {f+1}/{num_new_files}: {fname_str}")
+                # Log progress with enhanced logging if available
+                if hasattr(self, 'log_progress'):
+                    self.log_progress(f + 1, num_new_files, f"Parsing {ftype.upper()} files")
+                else:
+                    update_log(self, f"Processing file {f+1}/{num_new_files}: {fname_str}")
 
-            tic = process_time()
+                tic = process_time()
 
-            try:  # try to parse file
-                # Check for pickle file first if enabled
-                use_pickle = getattr(self, 'use_pickle_files_chk', None) and self.use_pickle_files_chk.isChecked()
-                pickle_file = None
+                try:  # try to parse file
+                    # Check for pickle file first if enabled
+                    use_pickle = getattr(self, 'use_pickle_files_chk', None) and self.use_pickle_files_chk.isChecked()
+                    pickle_file = None
                 
-                if use_pickle:
-                    # Look for pickle file in the same directory as source file
-                    source_dir = os.path.dirname(fnames_new[f])
-                    base_name = os.path.splitext(os.path.basename(fnames_new[f]))[0]
-                    ext = os.path.splitext(fnames_new[f])[1]
-                    pickle_file = os.path.join(source_dir, f"{base_name}{ext}.pkl")
+                    if use_pickle:
+                        # Look for pickle file in the same directory as source file
+                        source_dir = os.path.dirname(fnames_new[f])
+                        base_name = os.path.splitext(os.path.basename(fnames_new[f]))[0]
+                        ext = os.path.splitext(fnames_new[f])[1]
+                        pickle_file = os.path.join(source_dir, f"{base_name}{ext}.pkl")
                     
-                    # Check if pickle file exists and is newer than source
-                    if os.path.exists(pickle_file):
-                        source_mtime = os.path.getmtime(fnames_new[f])
-                        pickle_mtime = os.path.getmtime(pickle_file)
+                        # Check if pickle file exists and is newer than source
+                        if os.path.exists(pickle_file):
+                            source_mtime = os.path.getmtime(fnames_new[f])
+                            pickle_mtime = os.path.getmtime(pickle_file)
                         
-                        if pickle_mtime > source_mtime:
-                            try:
-                                data_new[i], status = load_pickle_file(self, pickle_file)
-                                if hasattr(self, 'log_success'):
-                                    self.log_success(f"Loaded pickle file: {os.path.basename(pickle_file)} ({status})")
-                                else:
-                                    update_log(self, f"✓ Loaded pickle file: {os.path.basename(pickle_file)} ({status})")
-                                i += 1
-                                self.fnames_scanned_params.append(fname_str)
-                                if not params_only:
-                                    self.fnames_plotted_cov.append(fname_str)
-                                continue
-                            except Exception as e:
-                                if hasattr(self, 'log_warning'):
-                                    self.log_warning(f"Failed to load pickle file, falling back to source: {str(e)}")
-                                else:
-                                    update_log(self, f"*** WARNING: Failed to load pickle file, falling back to source: {str(e)} ***")
+                            if pickle_mtime > source_mtime:
+                                try:
+                                    data_new[i], status = load_pickle_file(self, pickle_file)
+                                    if hasattr(self, 'log_success'):
+                                        self.log_success(f"Loaded pickle file: {os.path.basename(pickle_file)} ({status})")
+                                    else:
+                                        update_log(self, f"✓ Loaded pickle file: {os.path.basename(pickle_file)} ({status})")
+                                    i += 1
+                                    self.fnames_scanned_params.append(fname_str)
+                                    if not params_only:
+                                        self.fnames_plotted_cov.append(fname_str)
+                                    continue
+                                except Exception as e:
+                                    if hasattr(self, 'log_warning'):
+                                        self.log_warning(f"Failed to load pickle file, falling back to source: {str(e)}")
+                                    else:
+                                        update_log(self, f"*** WARNING: Failed to load pickle file, falling back to source: {str(e)} ***")
                 
-                # Parse source file if no pickle file or pickle loading failed
-                if ftype == 'all':  # read .all file for coverage (incl. params) or just params
-                    update_log(self, f"Parsing .all file: {fname_str}")
-                    data_new[i] = readALLswath(self, fnames_new[f], print_updates=self.print_updates,
-                                               parse_outermost_only=True, parse_params_only=params_only)
+                    # Parse source file if no pickle file or pickle loading failed
+                    if ftype == 'all':  # read .all file for coverage (incl. params) or just params
+                        update_log(self, f"Parsing .all file: {fname_str}")
+                        data_new[i] = readALLswath(self, fnames_new[f], print_updates=self.print_updates,
+                                                   parse_outermost_only=True, parse_params_only=params_only)
 
-                elif ftype == 'kmall':  # read .all file for coverage (incl. params) or just params
-                    update_log(self, f"Parsing .kmall file: {fname_str}")
-                    kmall_paths_attempted.append(fnames_new[f])
-                    extract_timing = (not params_only and
-                                      getattr(self, 'extract_timing_chk', None) and
-                                      self.extract_timing_chk.isChecked())
-                    include_skm = extract_timing
-                    save_index_file = save_index_file_enabled(self)
+                    elif ftype == 'kmall':  # read .all file for coverage (incl. params) or just params
+                        update_log(self, f"Parsing .kmall file: {fname_str}")
+                        kmall_paths_attempted.append(fnames_new[f])
+                        extract_timing = (not params_only and
+                                          getattr(self, 'extract_timing_chk', None) and
+                                          self.extract_timing_chk.isChecked())
+                        include_skm = extract_timing
+                        save_index_file = save_index_file_enabled(self)
                     
-                    # Time the KMALL processing with optimized reader
-                    kmall_start_time = process_time()
-                    print('calling readKMALLswath from calc_coverage')
-                    data_new[i] = readKMALLswath(self, fnames_new[f], print_updates=self.print_updates,
-                                                 include_skm=include_skm, parse_params_only=params_only,
-                                                 read_mode='plot' if not params_only else 'param',
-                                                 save_index_file=save_index_file)
-                    kmall_end_time = process_time()
-                    kmall_processing_time = kmall_end_time - kmall_start_time
-                    print('***back from readKMALLswath in calc_coverage')
+                        # Time the KMALL processing with optimized reader
+                        kmall_start_time = process_time()
+                        print('calling readKMALLswath from calc_coverage')
+                        data_new[i] = readKMALLswath(self, fnames_new[f], print_updates=self.print_updates,
+                                                     include_skm=include_skm, parse_params_only=params_only,
+                                                     read_mode='plot' if not params_only else 'param',
+                                                     save_index_file=save_index_file)
+                        kmall_end_time = process_time()
+                        kmall_processing_time = kmall_end_time - kmall_start_time
+                        print('***back from readKMALLswath in calc_coverage')
                     
-                    # Log the timing information
-                    file_size_mb = os.path.getsize(fnames_new[f]) / (1024*1024)
-                    mode_str = 'plot' if not params_only else 'param'
-                    if hasattr(self, 'log_info'):
-                        self.log_info(f"KMALL optimized ({mode_str} mode): {fname_str} ({file_size_mb:.1f} MB) completed in {kmall_processing_time:.2f}s")
+                        # Log the timing information
+                        file_size_mb = os.path.getsize(fnames_new[f]) / (1024*1024)
+                        mode_str = 'plot' if not params_only else 'param'
+                        if hasattr(self, 'log_info'):
+                            self.log_info(f"KMALL optimized ({mode_str} mode): {fname_str} ({file_size_mb:.1f} MB) completed in {kmall_processing_time:.2f}s")
+                        else:
+                            update_log(self, f"⚡ KMALL optimized ({mode_str} mode): {fname_str} ({file_size_mb:.1f} MB) completed in {kmall_processing_time:.2f}s")
+
+                        ping_bytes = [0] + np.diff(data_new[i]['start_byte']).tolist()
+
+                        for p in range(len(data_new[i]['XYZ'])):  # store ping start byte
+                            # print('storing ping start byte')
+                            data_new[i]['XYZ'][p]['bytes_from_last_ping'] = ping_bytes[p]
+
+                        try:  # simplify SKM header and sample times for plotting
+                            if not extract_timing:
+                                raise KeyError('SKM extraction disabled')
+                            num_SKM = len(data_new[i]['SKM']['header'])
+                            # print('********* trying to print items in sample datagram j')
+                            # sample_keys = [k for k in data_new[i]['SKM']['sample'].keys()]
+                            # for k in sample_keys:
+                            # 	SKM_roll_rate.append(data_new[i]['SKM']['sample'][k]['KMdefault']
+
+                            SKM_header_datetime = [data_new[i]['SKM']['header'][j]['dgdatetime'] for j in range(num_SKM)]
+                            SKM_sample_datetime = [data_new[i]['SKM']['sample'][j]['KMdefault']['datetime'][0] for j in range(num_SKM)]
+
+                        except:  # store placeholders if SKM was not parsed
+                            SKM_header_datetime = [datetime.datetime(1, 1, 1, 0, 0)]  # min datetime year is 1
+                            SKM_sample_datetime = [datetime.datetime(1, 1, 1, 0, 0)]
+
+                        self.skm_time[i] = {'fname': fnames_new[f],
+                                            'SKM_header_datetime': SKM_header_datetime,
+                                            'SKM_sample_datetime': SKM_sample_datetime}
+
                     else:
-                        update_log(self, f"⚡ KMALL optimized ({mode_str} mode): {fname_str} ({file_size_mb:.1f} MB) completed in {kmall_processing_time:.2f}s")
+                        update_log(self, 'Warning: Skipping unrecognized file type for ' + fname_str)
 
-                    ping_bytes = [0] + np.diff(data_new[i]['start_byte']).tolist()
+                    data_new[i]['fsize'] = os.path.getsize(fnames_new[f])
+                    print('stored file size ', data_new[i]['fsize'])
+                    fname_wcd = fnames_new[f].replace('.kmall', '.kmwcd').replace('.all', '.wcd')
 
-                    for p in range(len(data_new[i]['XYZ'])):  # store ping start byte
-                        # print('storing ping start byte')
-                        data_new[i]['XYZ'][p]['bytes_from_last_ping'] = ping_bytes[p]
+                    print('looking for watercolumn file: ', fname_wcd)
+                    try:  # try to get water column file size (.kmwcd for .kmall. or .wcd for .all)
+                        data_new[i]['fsize_wc'] = os.path.getsize(fname_wcd)
+                        print('stored water column file size', data_new[i]['fsize_wc'], ' for file', fnames_new[f])
 
-                    try:  # simplify SKM header and sample times for plotting
-                        if not extract_timing:
-                            raise KeyError('SKM extraction disabled')
-                        num_SKM = len(data_new[i]['SKM']['header'])
-                        # print('********* trying to print items in sample datagram j')
-                        # sample_keys = [k for k in data_new[i]['SKM']['sample'].keys()]
-                        # for k in sample_keys:
-                        # 	SKM_roll_rate.append(data_new[i]['SKM']['sample'][k]['KMdefault']
+                    except:
+                        data_new[i]['fsize_wc'] = np.nan
+                        print('failed to get water column file size for file ', fname_wcd)
 
-                        SKM_header_datetime = [data_new[i]['SKM']['header'][j]['dgdatetime'] for j in range(num_SKM)]
-                        SKM_sample_datetime = [data_new[i]['SKM']['sample'][j]['KMdefault']['datetime'][0] for j in range(num_SKM)]
+                    # Enhanced success logging
+                    if hasattr(self, 'log_success'):
+                        self.log_success(f"Successfully parsed {fname_str} ({data_new[i]['fsize'] / (1024*1024):.1f} MB)")
+                    else:
+                        update_log(self, 'Parsed file ' + fname_str)
+                    i += 1  # increment successful file counter
 
-                    except:  # store placeholders if SKM was not parsed
-                        SKM_header_datetime = [datetime.datetime(1, 1, 1, 0, 0)]  # min datetime year is 1
-                        SKM_sample_datetime = [datetime.datetime(1, 1, 1, 0, 0)]
+                    # log whether scanned or plotted so only new files are processed on next call of that type
+                    self.fnames_scanned_params.append(fname_str)  # all files get scanned for parameters
 
-                    self.skm_time[i] = {'fname': fnames_new[f],
-                                        'SKM_header_datetime': SKM_header_datetime,
-                                        'SKM_sample_datetime': SKM_sample_datetime}
+                    if not params_only:  # note if coverage was also calculate for this file
+                        self.fnames_plotted_cov.append(fname_str)
 
-                else:
-                    update_log(self, 'Warning: Skipping unrecognized file type for ' + fname_str)
+                except Exception as e:  # failed to parse this file
+                    if ftype == 'kmall':
+                        cleanup_kmall_index_if_disabled(self, fnames_new[f])
+                    if hasattr(self, 'log_error'):
+                        self.log_error(f"Failed to parse {fname_str}", e)
+                    else:
+                        update_log(self, 'No swath data parsed for ' + fname_str)
 
-                data_new[i]['fsize'] = os.path.getsize(fnames_new[f])
-                print('stored file size ', data_new[i]['fsize'])
-                fname_wcd = fnames_new[f].replace('.kmall', '.kmwcd').replace('.all', '.wcd')
+                update_processing_progress(self, f + 1)
 
-                print('looking for watercolumn file: ', fname_wcd)
-                try:  # try to get water column file size (.kmwcd for .kmall. or .wcd for .all)
-                    data_new[i]['fsize_wc'] = os.path.getsize(fname_wcd)
-                    print('stored water column file size', data_new[i]['fsize_wc'], ' for file', fnames_new[f])
+                toc = process_time()
+                parse_time = toc-tic
+                # print('parsing COVERAGE took', parse_time)
 
-                except:
-                    data_new[i]['fsize_wc'] = np.nan
-                    print('failed to get water column file size for file ', fname_wcd)
+            toc1 = process_time()
+            refresh_time = toc1 - tic1
+            # print('parsing WHOLE DATASET for COVERAGE took', refresh_time)
 
-                # Enhanced success logging
-                if hasattr(self, 'log_success'):
-                    self.log_success(f"Successfully parsed {fname_str} ({data_new[i]['fsize'] / (1024*1024):.1f} MB)")
-                else:
-                    update_log(self, 'Parsed file ' + fname_str)
-                i += 1  # increment successful file counter
+            update_log(self, f"Processing {len(data_new)} parsed files...")
+            self.data_new = interpretMode(self, data_new, print_updates=self.print_updates)  # True)
+            det_new = sortDetectionsCoverage(self, data_new, print_updates=self.print_updates, params_only=params_only)  # True)
 
-                # log whether scanned or plotted so only new files are processed on next call of that type
-                self.fnames_scanned_params.append(fname_str)  # all files get scanned for parameters
+            if len(self.det) == 0:  # if detection dict is empty with no keys, store new detection dict
+                self.det = det_new
+                update_log(self, f"Created new detection dictionary with {len(det_new)} keys")
 
-                if not params_only:  # note if coverage was also calculate for this file
-                    self.fnames_plotted_cov.append(fname_str)
+            else:  # otherwise, append new detections to existing detection dict
+                for key, value in det_new.items():  # loop through the new data and append to existing self.det
+                    self.det[key].extend(value)
+                update_log(self, f"Appended new data to existing detection dictionary")
 
-            except Exception as e:  # failed to parse this file
-                if ftype == 'kmall':
-                    cleanup_kmall_index_if_disabled(self, fnames_new[f])
-                if hasattr(self, 'log_error'):
-                    self.log_error(f"Failed to parse {fname_str}", e)
-                else:
-                    update_log(self, 'No swath data parsed for ' + fname_str)
+            # Enhanced completion logging
+            success_msg = f"Successfully processed {i} out of {num_new_files} files"
+            if hasattr(self, 'log_success'):
+                self.log_success(success_msg)
+            else:
+                update_log(self, 'Finished ' + ('scanning parameters' if params_only else 'calculating coverage') + \
+                           ' from ' + str(num_new_files) + ' new file(s)')
 
-            update_prog(self, f + 1)
+            if num_new_files > 0:
+                update_processing_progress(
+                    self,
+                    min(f + 1, num_new_files),
+                    f'Finished {progress_prefix.lower()}'
+                )
 
-            toc = process_time()
-            parse_time = toc-tic
-            # print('parsing COVERAGE took', parse_time)
+            # update system information from detections
+            update_log(self, "Updating system information from parsed data...")
+            update_system_info(self, self.det, force_update=True, fname_str_replace='_trimmed')
 
-        toc1 = process_time()
-        refresh_time = toc1 - tic1
-        # print('parsing WHOLE DATASET for COVERAGE took', refresh_time)
+            if not params_only:  # set show data chk to True (and refresh that way) or refresh plot directly, but not both!
+                self.timing_data_extracted = bool(getattr(self, 'extract_timing_chk', None) and
+                                                  self.extract_timing_chk.isChecked())
+                update_timing_tab_visibility(self)
 
-        update_log(self, f"Processing {len(data_new)} parsed files...")
-        self.data_new = interpretMode(self, data_new, print_updates=self.print_updates)  # True)
-        det_new = sortDetectionsCoverage(self, data_new, print_updates=self.print_updates, params_only=params_only)  # True)
+                if not self.show_data_chk.isChecked():
+                    self.show_data_chk.setChecked(True)
 
-        if len(self.det) == 0:  # if detection dict is empty with no keys, store new detection dict
-            self.det = det_new
-            update_log(self, f"Created new detection dictionary with {len(det_new)} keys")
+                else:  # refresh coverage plots only if swath data was parsed
+                    refresh_plot(self, print_time=True, call_source='calc_coverage')
 
-        else:  # otherwise, append new detections to existing detection dict
-            for key, value in det_new.items():  # loop through the new data and append to existing self.det
-                self.det[key].extend(value)
-            update_log(self, f"Appended new data to existing detection dictionary")
+                self.plot_tabs.setCurrentIndex(0)  # show coverage plot tab
 
-        # Enhanced completion logging
-        success_msg = f"Successfully processed {i} out of {num_new_files} files"
-        if hasattr(self, 'log_success'):
-            self.log_success(success_msg)
-        else:
-            update_log(self, 'Finished ' + ('scanning parameters' if params_only else 'calculating coverage') + \
-                       ' from ' + str(num_new_files) + ' new file(s)')
+            else:
+                self.tabs.setCurrentIndex(2)  # show param search tab
+                self.plot_tabs.setCurrentIndex(3)  # show parameter history tab
 
-        self.current_file_lbl.setText('Current File [' + str(min([f + 1, num_new_files])) + '/' + str(num_new_files) +
-                                          ']: Finished calculating coverage')
+            cleanup_kmall_indexes_if_disabled(self, kmall_paths_attempted)
 
-        # update system information from detections
-        update_log(self, "Updating system information from parsed data...")
-        update_system_info(self, self.det, force_update=True, fname_str_replace='_trimmed')
+            sort_det_time(self)  # sort all detections by time for runtime parameter logging/searching
 
-        if not params_only:  # set show data chk to True (and refresh that way) or refresh plot directly, but not both!
-            self.timing_data_extracted = bool(getattr(self, 'extract_timing_chk', None) and
-                                              self.extract_timing_chk.isChecked())
-            update_timing_tab_visibility(self)
-
-            if not self.show_data_chk.isChecked():
-                self.show_data_chk.setChecked(True)
-
-            else:  # refresh coverage plots only if swath data was parsed
-                refresh_plot(self, print_time=True, call_source='calc_coverage')
-
-            self.plot_tabs.setCurrentIndex(0)  # show coverage plot tab
-
-        else:
-            self.tabs.setCurrentIndex(2)  # show param search tab
-            self.plot_tabs.setCurrentIndex(3)  # show parameter history tab
-
-        cleanup_kmall_indexes_if_disabled(self, kmall_paths_attempted)
-
-        sort_det_time(self)  # sort all detections by time for runtime parameter logging/searching
-
-        # End operation logging
-        if hasattr(self, 'end_operation_log'):
-            self.end_operation_log(operation_name, f"Processed {i}/{num_new_files} files successfully")
+            # End operation logging
+            if hasattr(self, 'end_operation_log'):
+                self.end_operation_log(operation_name, f"Processed {i}/{num_new_files} files successfully")
+        finally:
+            close_processing_progress_dialog(self)
 
     # Update button states after processing to reflect current state
     update_button_states(self)
@@ -3528,7 +3600,7 @@ def save_settings_info(self, save_dir, save_name):
 
             f.write("\nPROCESS SETTINGS:\n")
             f.write("-" * 19 + "\n")
-            f.write(f"Save Index File: {save_index_file_enabled(self)}\n")
+            f.write(f"Save Index: {save_index_file_enabled(self)}\n")
             if hasattr(self, 'extract_timing_chk'):
                 f.write(f"Extract Timing: {self.extract_timing_chk.isChecked()}\n")
             
@@ -3557,12 +3629,7 @@ def _apply_analysis_settings(self, payload):
     process_settings = payload.get('process_settings', {})
 
     if hasattr(self, 'save_index_chk') and process_settings.get('save_index_file') is not None:
-        checked = bool(process_settings.get('save_index_file'))
-        self.save_index_chk.setChecked(checked)
-        if hasattr(self, 'save_index_pkl_chk'):
-            self.save_index_pkl_chk.blockSignals(True)
-            self.save_index_pkl_chk.setChecked(checked)
-            self.save_index_pkl_chk.blockSignals(False)
+        self.save_index_chk.setChecked(bool(process_settings.get('save_index_file')))
     if hasattr(self, 'extract_timing_chk') and process_settings.get('extract_timing') is not None:
         self.extract_timing_chk.setChecked(bool(process_settings.get('extract_timing')))
         update_timing_tab_visibility(self)
@@ -5629,10 +5696,165 @@ def trend_table_cell_changed(self, row, column):
     else:
         update_log(self, 'No coverage data available for trend export')
 
-def update_param_log(self, entry, font_color='black'):  # update the acquisition param log
-    self.param_log.setTextColor(QColor(font_color))
-    self.param_log.append(entry)
+PARAM_TABLE_COLUMNS = [
+    ('datetime', 'Date/Time'),
+    ('ping_mode', 'Ping Mode'),
+    ('pulse_form', 'Pulse Form'),
+    ('swath_mode', 'Swath Mode'),
+    ('max_port_deg', 'Port Limit (deg)'),
+    ('max_stbd_deg', 'Stbd Limit (deg)'),
+    ('max_port_m', 'Port Coverage (m)'),
+    ('max_stbd_m', 'Stbd Coverage (m)'),
+    ('frequency', 'Frequency'),
+    ('wl_z_m', 'Waterline Z (m)'),
+    ('tx_x_m', 'TX X (m)'),
+    ('tx_y_m', 'TX Y (m)'),
+    ('tx_z_m', 'TX Z (m)'),
+    ('tx_r_deg', 'TX Roll (deg)'),
+    ('tx_p_deg', 'TX Pitch (deg)'),
+    ('tx_h_deg', 'TX Head (deg)'),
+    ('rx_x_m', 'RX X (m)'),
+    ('rx_y_m', 'RX Y (m)'),
+    ('rx_z_m', 'RX Z (m)'),
+    ('rx_r_deg', 'RX Roll (deg)'),
+    ('rx_p_deg', 'RX Pitch (deg)'),
+    ('rx_h_deg', 'RX Head (deg)'),
+    ('aps_num', 'APS #'),
+    ('aps_x_m', 'APS X (m)'),
+    ('aps_y_m', 'APS Y (m)'),
+    ('aps_z_m', 'APS Z (m)'),
+]
+
+PARAM_TABLE_CHANGED_BG = QColor(255, 243, 176)
+
+
+def _param_values_equal(key, value_a, value_b):
+    """Return True when two raw parameter values should be treated as unchanged."""
+    if value_a is None and value_b is None:
+        return True
+    if value_a is None or value_b is None:
+        return False
+    if key in ('ping_mode', 'swath_mode', 'pulse_form'):
+        return str(value_a).rsplit('(')[0].strip() == str(value_b).rsplit('(')[0].strip()
+    if isinstance(value_a, (float, int)) or isinstance(value_b, (float, int)):
+        try:
+            return float(value_a) == float(value_b)
+        except (TypeError, ValueError):
+            return str(value_a) == str(value_b)
+    return value_a == value_b
+
+
+def configure_param_table(self):
+    """Initialize the Parameters tab table widget."""
+    if not hasattr(self, 'param_table'):
+        return
+    self.param_table.clear()
+    self.param_table.setColumnCount(len(PARAM_TABLE_COLUMNS))
+    self.param_table.setRowCount(0)
+    self.param_table.setHorizontalHeaderLabels([label for _, label in PARAM_TABLE_COLUMNS])
+    self.param_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+    self.param_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+    self.param_table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+    self.param_table.setAlternatingRowColors(False)
+    self.param_table.setSortingEnabled(False)
+    self.param_table.verticalHeader().setVisible(False)
+    header = self.param_table.horizontalHeader()
+    header.setStretchLastSection(True)
+    header.setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+
+
+def format_param_table_value(self, key, value):
+    """Format one parameter value for table display."""
+    if value is None:
+        return ''
+    if key == 'datetime':
+        try:
+            return value.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        except Exception:
+            return str(value)
+    if key in ('ping_mode', 'pulse_form', 'swath_mode') and isinstance(value, str):
+        return value.split('Swath')[0].strip().split('(')[0].strip()
+    if isinstance(value, float):
+        return f'{value:g}'
+    return str(value)
+
+
+def _param_rows_from_dict(param_dict, row_count):
+    """Build row dicts from a parameter dictionary with parallel list values."""
+    rows = []
+    for row_idx in range(row_count):
+        rows.append({key: param_dict.get(key, [''] * row_count)[row_idx] for key, _ in PARAM_TABLE_COLUMNS})
+    return rows
+
+
+def refresh_param_table(self, param_rows=None, clear=True):
+    """Populate the Parameters tab table from structured parameter rows."""
+    if not hasattr(self, 'param_table'):
+        return
+    if param_rows is None:
+        param_rows = _param_rows_from_dict(self.param_changes, len(self.param_changes.get('datetime', [])))
+
+    self.param_table.setSortingEnabled(False)
+    if clear:
+        self.param_table.setRowCount(0)
+    start_row = 0 if clear else self.param_table.rowCount()
+    self.param_table.setRowCount(start_row + len(param_rows))
+
+    for offset, row_dict in enumerate(param_rows):
+        row = start_row + offset
+        prev_row_dict = param_rows[offset - 1] if offset > 0 else None
+        for col, (key, _) in enumerate(PARAM_TABLE_COLUMNS):
+            text = format_param_table_value(self, key, row_dict.get(key, ''))
+            item = QtWidgets.QTableWidgetItem(text)
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            if prev_row_dict is not None and key != 'datetime':
+                if not _param_values_equal(key, row_dict.get(key), prev_row_dict.get(key)):
+                    item.setBackground(PARAM_TABLE_CHANGED_BG)
+            self.param_table.setItem(row, col, item)
+
+    self.param_table.resizeColumnsToContents()
     QtWidgets.QApplication.processEvents()
+
+
+def update_param_log_header(self, entry, font_color='black', clear_table=False):
+    """Append a status/header message above the parameter table."""
+    if not hasattr(self, 'param_log_header'):
+        return
+    if clear_table and hasattr(self, 'param_table'):
+        self.param_table.setRowCount(0)
+    self.param_log_header.setTextColor(QColor(font_color))
+    self.param_log_header.append(entry)
+    QtWidgets.QApplication.processEvents()
+
+
+def update_param_log(self, entry, font_color='black'):
+    """Backward-compatible alias for parameter log header messages."""
+    update_param_log_header(self, entry, font_color=font_color)
+
+
+def build_param_table_rows(self, include_initial=False):
+    """Build parameter rows for the table from current change results."""
+    rows = []
+    seen_datetimes = set()
+
+    if include_initial and isinstance(getattr(self, 'det', None), dict) and self.det.get('datetime'):
+        initial_row = {key: self.det.get(key, [None])[0] for key, _ in PARAM_TABLE_COLUMNS}
+        dt_key = initial_row.get('datetime')
+        rows.append(initial_row)
+        if dt_key is not None:
+            seen_datetimes.add(dt_key)
+
+    change_count = len(self.param_changes.get('datetime', []))
+    for i in range(change_count):
+        row = {key: self.param_changes.get(key, [''] * change_count)[i] for key, _ in PARAM_TABLE_COLUMNS}
+        dt_key = row.get('datetime')
+        if dt_key in seen_datetimes:
+            continue
+        rows.append(row)
+        if dt_key is not None:
+            seen_datetimes.add(dt_key)
+
+    return rows
 
 def sort_det_time(self):  # sort detections by time (after new files are added)
     # Debug print removed
@@ -5682,7 +5904,7 @@ def get_param(self, i=0, nearest='next', update_log=False):  # get the parameter
     print('made self.param_state at j=', j, ' --> ', self.param_state)
 
     if update_log:
-        update_param_log(self, format_param_str(self))
+        refresh_param_table(self, build_param_table_rows(self, include_initial=False), clear=True)
 
 def format_param_str(self, param_dict=[], i=0):  # format fields of params dict for printing / updating log
     if not param_dict:  # default to current param state dict if not specified
@@ -5756,7 +5978,7 @@ def get_param_changes(self, search_dict={}, update_log=False, header='', include
     header = re.sub(r'rx_x_m.*, rx_y_m.*, rx_z_m.*, rx_r_deg.*, rx_p_deg.*, rx_h_deg', 'RX [XYZRPH]', header)
     header = re.sub(r'aps_num.*, aps_x_m.*, aps_y_m.*, aps_z_m', 'POS. [(#)XYZ]', header)
 
-    update_param_log(self, header)
+    update_param_log_header(self, header, clear_table=True)
 
     idx_change = []
     for param, crit in search_dict.items():  # find CHANGES for each parameter of interest, then sort
@@ -5867,26 +6089,17 @@ def get_param_changes(self, search_dict={}, update_log=False, header='', include
     print('got idx_change_set = ', idx_change_set)
     print('updated self.param_changes =', self.param_changes)
 
-    if include_initial:  # print the initial state if desired
-        get_param(self, i=0, update_log=True)
+    if include_initial and len(self.det.get('datetime', [])) > 0:
+        get_param(self, i=0, update_log=False)
 
     if update_log:
-        # Debug print removed
-        if len(self.param_changes['datetime']) > 0:
-            print('1')
-            for i in range(len(self.param_changes['datetime'])):
-                print('calling update_param_log')
-                update_param_log(self, format_param_str(self, param_dict=self.param_changes, i=i))
-            print('2')
-            update_param_log(self, 'End of search results...')
-
+        refresh_param_table(self, build_param_table_rows(self, include_initial=include_initial), clear=True)
+        if len(self.param_changes.get('datetime', [])) > 0 or include_initial:
+            update_param_log_header(self, 'End of search results...')
         elif include_initial:
-            print('3')
-            update_param_log(self, 'End of search results...')
-
+            update_param_log_header(self, 'End of search results...')
         else:
-            print('4')
-            update_param_log(self, 'No results...')
+            update_param_log_header(self, 'No results...')
     print('end of routine calling update_param_log')
 
 
@@ -5935,32 +6148,66 @@ def update_param_search(self, update_log=True):  # update runtime param search c
     print('end update_param_search')
 
 def save_param_log(self):
-    # save the acquisition parameter search log to a text file
-    param_log_name = QtWidgets.QFileDialog.getSaveFileName(self, 'Save parameter log...', self.param_save_dir + '/runtime_parameter_log.txt',
-                                                           '.TXT files (*.txt)')
+    # save the acquisition parameter search log to CSV (or plain text fallback)
+    param_log_name = QtWidgets.QFileDialog.getSaveFileName(
+        self,
+        'Save parameter log...',
+        self.param_save_dir + '/runtime_parameter_log.csv',
+        'CSV files (*.csv);;Text files (*.txt)'
+    )
 
     if not param_log_name[0]:  # abandon if no output location selected
         update_log(self, 'No parameter log output file selected.')
         return
 
-    else:  # save param log to text file
-        fname_out = param_log_name[0]
+    fname_out = param_log_name[0]
 
-        with open(fname_out, 'w') as param_log_file:
-            param_log_file.write(str(self.param_log.toPlainText()))
+    try:
+        import csv
+        if fname_out.lower().endswith('.txt'):
+            with open(fname_out, 'w', encoding='utf-8') as param_log_file:
+                if hasattr(self, 'param_log_header'):
+                    param_log_file.write(self.param_log_header.toPlainText())
+                    param_log_file.write('\n\n')
+                if hasattr(self, 'param_table'):
+                    headers = [label for _, label in PARAM_TABLE_COLUMNS]
+                    param_log_file.write(','.join(headers) + '\n')
+                    for row in range(self.param_table.rowCount()):
+                        row_values = []
+                        for col in range(self.param_table.columnCount()):
+                            item = self.param_table.item(row, col)
+                            value = item.text() if item else ''
+                            if ',' in value or '"' in value:
+                                value = '"' + value.replace('"', '""') + '"'
+                            row_values.append(value)
+                        param_log_file.write(','.join(row_values) + '\n')
+        else:
+            if not fname_out.lower().endswith('.csv'):
+                fname_out += '.csv'
+            with open(fname_out, 'w', newline='', encoding='utf-8') as param_log_file:
+                writer = csv.writer(param_log_file)
+                writer.writerow([label for _, label in PARAM_TABLE_COLUMNS])
+                if hasattr(self, 'param_table'):
+                    for row in range(self.param_table.rowCount()):
+                        writer.writerow([
+                            self.param_table.item(row, col).text() if self.param_table.item(row, col) else ''
+                            for col in range(self.param_table.columnCount())
+                        ])
+    except Exception as e:
+        update_log(self, f'Failed to save parameter log: {str(e)}')
+        return
 
-        # Save the directory for next time
-        if fname_out:
-            import os
-            save_dir = os.path.dirname(fname_out)
-            if save_dir:
-                self.param_save_dir = save_dir
-                config = load_session_config()
-                config["last_param_save_dir"] = save_dir
-                save_session_config(config)
+    # Save the directory for next time
+    if fname_out:
+        save_dir = os.path.dirname(fname_out)
+        if save_dir:
+            self.param_save_dir = save_dir
+            config = load_session_config()
+            config["last_param_save_dir"] = save_dir
+            save_session_config(config)
 
-        update_log(self, 'Saved parameter log to ' + fname_out.rsplit('/')[-1])
-        update_param_log(self, '\n*** SAVED PARAMETER LOG *** --> ' + fname_out)
+    update_log(self, 'Saved parameter log to ' + os.path.basename(fname_out))
+    update_param_log_header(self, '\n*** SAVED PARAMETER LOG *** --> ' + fname_out)
 
 def plot_backscatter(self, det, is_archive=False, print_updates=False, det_name='detection dictionary'):
     # plot the parsed detections from new or archive data dict with backscatter coloring; return the number of points plotted after filtering
@@ -7268,17 +7515,11 @@ def convert_files_to_pickle(self):
     
     # Show progress dialog
     progress_dialog = QtWidgets.QProgressDialog("Converting files to pickle format...", "Cancel", 0, len(source_files), self)
+    progress_dialog.setWindowTitle("Convert to Swath PKL")
     progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
     progress_dialog.setAutoClose(False)
     progress_dialog.setAutoReset(False)
-
-    # Show the embedded progress bar in the left panel
-    if hasattr(self, 'convert_pb'):
-        self.convert_pb.setMaximum(len(source_files))
-        self.convert_pb.setValue(0)
-        self.convert_pb.setVisible(True)
-    if hasattr(self, 'convert_pb_lbl'):
-        self.convert_pb_lbl.setVisible(True)
+    progress_dialog.setMinimumDuration(0)
 
     converted_count = 0
     skipped_count = 0
@@ -7288,11 +7529,7 @@ def convert_files_to_pickle(self):
     try:
         for i, source_file in enumerate(source_files):
             progress_dialog.setValue(i)
-            progress_dialog.setLabelText(f"Converting: {os.path.basename(source_file)}")
-
-            # Update the embedded progress bar
-            if hasattr(self, 'convert_pb'):
-                self.convert_pb.setValue(i)
+            progress_dialog.setLabelText(f"Current file [{i + 1}/{len(source_files)}]: {os.path.basename(source_file)}")
 
             if progress_dialog.wasCanceled():
                 break
@@ -7332,7 +7569,7 @@ def convert_files_to_pickle(self):
                         data = readKMALLswath(self, source_file, print_updates=False, 
                                              include_skm=False, parse_params_only=False,
                                              read_mode='plot',
-                                             save_index_file=save_index_file_enabled(self))
+                                             save_index_file=False)
                         kmall_end_time = process_time()
                         kmall_processing_time = kmall_end_time - kmall_start_time
                         
@@ -7345,7 +7582,8 @@ def convert_files_to_pickle(self):
                     else:
                         continue
                 except Exception as e:
-                    cleanup_kmall_index_if_disabled(self, source_file)
+                    if source_file.lower().endswith('.kmall'):
+                        remove_kmall_index_cache(source_file)
                     failed_count += 1
                     if hasattr(self, 'log_error'):
                         self.log_error(f"Failed to parse {os.path.basename(source_file)}", e)
@@ -7577,7 +7815,8 @@ def convert_files_to_pickle(self):
                 total_size_saved += size_saved
                 
                 converted_count += 1
-                cleanup_kmall_index_if_disabled(self, source_file)
+                if source_file.lower().endswith('.kmall'):
+                    remove_kmall_index_cache(source_file)
                 
                 if hasattr(self, 'log_success'):
                     self.log_success(f"Converted {os.path.basename(source_file)} in {parse_time:.2f}s "
@@ -7587,7 +7826,8 @@ def convert_files_to_pickle(self):
                                    f"({source_size/(1024*1024):.1f}MB → {pickle_size/(1024*1024):.1f}MB)")
                 
             except Exception as e:
-                cleanup_kmall_index_if_disabled(self, source_file)
+                if source_file.lower().endswith('.kmall'):
+                    remove_kmall_index_cache(source_file)
                 failed_count += 1
                 if hasattr(self, 'log_error'):
                     self.log_error(f"Failed to convert {os.path.basename(source_file)}", e)
@@ -7595,14 +7835,6 @@ def convert_files_to_pickle(self):
                     update_log(self, f"*** ERROR: Failed to convert {os.path.basename(source_file)}: {str(e)} ***")
         
         progress_dialog.setValue(len(source_files))
-
-        # Update embedded progress bar to full and then hide it
-        if hasattr(self, 'convert_pb'):
-            self.convert_pb.setValue(len(source_files))
-            QtWidgets.QApplication.processEvents()
-            self.convert_pb.setVisible(False)
-        if hasattr(self, 'convert_pb_lbl'):
-            self.convert_pb_lbl.setVisible(False)
 
         # Show completion summary
         summary = f"Conversion complete!\n\n"
@@ -7718,10 +7950,6 @@ def convert_files_to_pickle(self):
     
     finally:
         progress_dialog.close()
-        if hasattr(self, 'convert_pb'):
-            self.convert_pb.setVisible(False)
-        if hasattr(self, 'convert_pb_lbl'):
-            self.convert_pb_lbl.setVisible(False)
 
 
 def _load_pickle_files_as_swath(self, pickle_files):
@@ -8123,37 +8351,23 @@ def load_swath_pkl(self):
             # Process each pickle file
             successful_files = 0
             total_files = len(pickle_files)
-            
-            # Initialize progress bar to show "current / total files"
-            if hasattr(self, 'calc_pb'):
-                try:
-                    self.calc_pb.setVisible(True)
-                except Exception:
-                    pass
-                self.calc_pb.setMaximum(total_files)
-                self.calc_pb.setValue(0)
-                try:
-                    self.calc_pb.setFormat("%v / %m files")
-                    self.calc_pb.setTextVisible(True)
-                except Exception:
-                    pass
+            open_processing_progress_dialog(
+                self,
+                "Loading Swath PKL",
+                "Loading Swath PKL files...",
+                total_files
+            )
 
             for i, pickle_file in enumerate(pickle_files):
                 filename = os.path.basename(pickle_file)
                 
-                # Update progress
-                if hasattr(self, 'calc_pb'):
-                    self.calc_pb.setValue(i + 1)
-                if hasattr(self, 'current_file_lbl'):
-                    try:
-                        self.current_file_lbl.setText(f"Loading: {filename}")
-                    except Exception:
-                        pass
-                try:
-                    from PyQt6.QtWidgets import QApplication
-                    QApplication.processEvents()
-                except Exception:
-                    pass
+                if update_processing_progress(
+                    self,
+                    i,
+                    f"Current file [{i + 1}/{total_files}]: {filename}"
+                ):
+                    update_log(self, 'Loading cancelled by user.')
+                    break
 
                 if hasattr(self, 'log_progress'):
                     self.log_progress(i + 1, total_files, f"Loading pickle files")
@@ -8268,6 +8482,8 @@ def load_swath_pkl(self):
                     else:
                         update_log(self, f"*** ERROR: Failed to load {filename}: {str(e)} ***")
             
+            update_processing_progress(self, total_files, "Finished loading Swath PKL files")
+
             # Process the loaded data
             if successful_files > 0:
                 # Interpret modes and sort detections
@@ -8384,24 +8600,13 @@ def load_swath_pkl(self):
                     # Refresh plot
                     refresh_plot(self, print_time=True, call_source='load_swath_pkl')
 
-            # Finalize progress bar
-            if hasattr(self, 'calc_pb'):
-                self.calc_pb.setValue(total_files)
-            if hasattr(self, 'current_file_lbl'):
-                try:
-                    self.current_file_lbl.setText("Current file:")
-                except Exception:
-                    pass
-                    
-                    # Log completion
-                    success_msg = f"Successfully loaded {successful_files} pickle files as swath data"
-                    if hasattr(self, 'end_operation_log'):
-                        self.end_operation_log("Loading Swath Pickle Files", f"{successful_files} files loaded")
-                    else:
-                        update_log(self, f"=== COMPLETED: Loading Swath Pickle Files - {successful_files} files loaded ===")
+            if successful_files > 0:
+                success_msg = f"Successfully loaded {successful_files} pickle files as swath data"
+                if hasattr(self, 'end_operation_log'):
+                    self.end_operation_log("Loading Swath Pickle Files", f"{successful_files} files loaded")
                 else:
-                    update_log(self, "No valid data found in pickle files")
-            else:
+                    update_log(self, f"=== COMPLETED: Loading Swath Pickle Files - {successful_files} files loaded ===")
+            elif total_files > 0:
                 update_log(self, "No pickle files were successfully loaded")
                 
         except Exception as e:
@@ -8412,6 +8617,8 @@ def load_swath_pkl(self):
             
             if hasattr(self, 'end_operation_log'):
                 self.end_operation_log("Loading Swath Pickle Files", "Failed")
+        finally:
+            close_processing_progress_dialog(self)
     
         if hasattr(self, 'swath_filenames') and pickle_file not in self.swath_filenames:
             self.swath_filenames.append(pickle_file)
