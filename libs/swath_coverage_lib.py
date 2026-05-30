@@ -231,7 +231,7 @@ def setup(self):
     self.x_max = 0.0
     self.z_max = 0.0
     self.model_list = ['EM 2040', 'EM 2042', 'EM 302', 'EM 304', 'EM 710', 'EM 712', 'EM 122', 'EM 124']
-    self.cmode_list = ['Depth', 'Backscatter', 'Ping Mode', 'Pulse Form', 'Swath Mode', 'Frequency', 'Solid Color']
+    self.cmode_list = ['Depth', 'Backscatter', 'Depth Mode', 'Pulse Form', 'Swath Mode', 'Frequency', 'Solid Color']
     self.top_data_list = []
     self.clim_list = ['All data', 'Filtered data', 'Fixed limits', 'Custom Plot']
     self.sis4_tx_z_field = 'S1Z'  # .all IP datagram field name for TX array Z offset (meters +down from origin)
@@ -1494,7 +1494,7 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
                 print('***using frequency info for ping mode***')
                 c_set = {'400 kHz': 'red', '300 kHz': 'darkorange', '200 kHz': 'gold'}
                 self.legend_label = 'Freq. (EM 2040, SIS 4)'
-                update_log(self, 'Ping mode color scale set to frequency mode (EM 2040, SIS 4 format)')
+                update_log(self, 'Depth mode color scale set to frequency mode (EM 2040, SIS 4 format)')
 
         elif cmode == 'pulse_form':  # define dict of pulse forms and colors
             c_set = {'CW': 'red', 'Mixed': 'limegreen', 'FM': 'blue'}  # set of pulse forms
@@ -2603,7 +2603,7 @@ def update_axes(self):
     self.title_str = 'Swath Width vs. Depth\n' + sys_info_str
     self.title_str_data = 'Data Rate vs. Depth\n' + sys_info_str
     self.title_str_backscatter = 'Swath Width vs. Depth - Backscatter\n' + sys_info_str
-    self.title_str_pingmode = 'Swath Width vs. Depth - Ping Mode\n' + sys_info_str
+    self.title_str_pingmode = 'Swath Width vs. Depth - Depth Mode\n' + sys_info_str
     
     self.title_str_pulseform = 'Swath Width vs. Depth - Pulse Form\n' + sys_info_str
     self.title_str_swathmode = 'Swath Width vs. Depth - Swath Mode\n' + sys_info_str
@@ -3029,7 +3029,7 @@ def add_legend(self):
                     pingmode_c_set = {'400 kHz': 'red', '300 kHz': 'darkorange', '200 kHz': 'gold'}
                     pingmode_legend_label = 'Freq. (EM 2040, SIS 4)'
                 else:
-                    pingmode_legend_label = 'Ping Mode'
+                    pingmode_legend_label = 'Depth Mode'
                 
                 pingmode_legend_handles = [patches.Patch(color=c, label=l) for l, c in pingmode_c_set.items()]
                 cbar = params['ax'].legend(handles=pingmode_legend_handles, title=pingmode_legend_label,
@@ -3187,7 +3187,7 @@ def save_plot(self):
 
 
 def save_all_plots(self):
-    # save all plots (Depth, Backscatter, Ping Mode, Pulse Form, Swath Mode, Frequency) with settings
+    # save all plots (Depth, Backscatter, Depth Mode, Pulse Form, Swath Mode, Frequency) with settings
     config = load_session_config()
     last_parent_dir = getattr(self, 'last_plot_parent_dir', None) or config.get(
         "last_plot_parent_dir", getattr(self, 'plot_save_dir', os.getcwd()))
@@ -3224,7 +3224,7 @@ def save_all_plots(self):
     plot_types = [
         ('Depth', self.swath_figure),
         ('Backscatter', self.backscatter_figure),
-        ('Ping_Mode', self.pingmode_figure),
+        ('Depth_Mode', self.pingmode_figure),
         ('Pulse_Form', self.pulseform_figure),
         ('Swath_Mode', self.swathmode_figure),
         ('Frequency', self.frequency_figure),
@@ -3292,7 +3292,7 @@ def save_all_plots(self):
             ax_map = {
                 'Depth': self.swath_ax,
                 'Backscatter': self.backscatter_ax,
-                'Ping_Mode': self.pingmode_ax,
+                'Depth_Mode': self.pingmode_ax,
                 'Pulse_Form': self.pulseform_ax,
                 'Swath_Mode': self.swathmode_ax,
                 'Frequency': self.frequency_ax,
@@ -3302,7 +3302,7 @@ def save_all_plots(self):
             ax = ax_map.get(plot_type)
             
             # Store and re-apply axis limits to prevent expansion from angle/water depth lines
-            if ax and plot_type in ['Backscatter', 'Ping_Mode', 'Pulse_Form', 'Swath_Mode', 'Frequency']:
+            if ax and plot_type in ['Backscatter', 'Depth_Mode', 'Pulse_Form', 'Swath_Mode', 'Frequency']:
                 xlim = ax.get_xlim()
                 ylim = ax.get_ylim()
                 # Clip all plot elements to axis bounds to prevent bbox expansion
@@ -3321,7 +3321,7 @@ def save_all_plots(self):
             figure.tight_layout(pad=2.0, rect=[0, 0, 1, 0.97])
             
             # Re-apply layouts and limits for other plots to match Depth plot behavior
-            if plot_type in ['Backscatter', 'Ping_Mode', 'Pulse_Form', 'Swath_Mode', 'Frequency']:
+            if plot_type in ['Backscatter', 'Depth_Mode', 'Pulse_Form', 'Swath_Mode', 'Frequency']:
                 # Re-apply axis limits after tight_layout
                 ax.set_xlim(xlim)
                 ax.set_ylim(ylim)
@@ -5698,7 +5698,7 @@ def trend_table_cell_changed(self, row, column):
 
 PARAM_TABLE_COLUMNS = [
     ('datetime', 'Date/Time'),
-    ('ping_mode', 'Ping Mode'),
+    ('ping_mode', 'Depth Mode'),
     ('pulse_form', 'Pulse Form'),
     ('swath_mode', 'Swath Mode'),
     ('max_port_deg', 'Port Limit (deg)'),
@@ -6645,7 +6645,7 @@ def plot_pingmode(self, det, is_archive=False, print_updates=False, det_name='de
             pingmode_legend_label = 'Freq. (EM 2040, SIS 4)'
             mode_all_base = [m for m in mode_all_base]  # no normalization needed for kHz
         else:
-            pingmode_legend_label = 'Ping Mode'
+            pingmode_legend_label = 'Depth Mode'
 
         mode_to_index = {mode: idx for idx, mode in enumerate(c_set.keys())}
         c_all_numeric = [mode_to_index.get(mode, 0) for mode in mode_all_base]  # default to 0 if mode not found

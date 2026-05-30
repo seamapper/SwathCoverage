@@ -77,7 +77,7 @@ A comprehensive GUI application for analyzing and visualizing multibeam echosoun
 - **Fast KMALL Processing**: Optional `.swathcov.idx` index sidecars, single-pass extraction, and plot-mode outermost-sounding reads
 - **Extract Timing** (optional): Parse SKM datagrams and show the Timing plot tab when enabled during coverage calculation
 - **Save Index** (optional): Keep KMALL index sidecars after **Calculate Coverage** for faster re-indexing; PKL conversion always removes sidecars
-- **Comprehensive Plotting**: Generate plots for depth, backscatter, ping mode, pulse form, swath mode, frequency, data rate, and timing
+- **Comprehensive Plotting**: Generate plots for depth, backscatter, depth mode, pulse form, swath mode, frequency, data rate, and timing
 - **Interactive Visualization**: Hover over data points to see the source filename in the status bar
 - **Coverage Trend Analysis**: Calculate, edit, digitize, and export swath coverage trends
 - **Data Filtering**: Filter by angle, depth, width, backscatter, ping interval, and runtime parameters
@@ -150,7 +150,7 @@ Long-running operations (**Calculate Coverage**, **Scan Parameters Only**, **Con
 |---|---|---|
 | Depth | Main swath coverage scatter plot, colored by depth | Always |
 | Backscatter | Backscatter intensity scatter plot | Always |
-| Ping Mode | Depth mode over time | Always |
+| Depth Mode | Depth mode over time | Always |
 | Pulse Form | CW vs. FM pulse form over time | Always |
 | Swath Mode | Single vs. Dual swath over time | Always |
 | Frequency | Operating frequency over time | Always |
@@ -332,7 +332,7 @@ The toolkit supports Kongsberg EM series multibeam systems:
 
 1. **Depth**: Swath coverage scatter plot, colored by depth (shallow = red, deep = blue)
 2. **Backscatter**: Acoustic backscatter amplitude visualization
-3. **Ping Mode**: Depth mode over time (Very Shallow, Shallow, Medium, Deep, etc.)
+3. **Depth Mode**: Depth mode over time (Very Shallow, Shallow, Medium, Deep, etc.)
 4. **Pulse Form**: Continuous Wave (CW) vs. Frequency Modulated (FM) pulse forms
 5. **Swath Mode**: Single vs. Dual swath operation
 6. **Frequency**: Operating frequency over time

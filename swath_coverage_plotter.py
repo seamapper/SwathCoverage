@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.12" 
+__version__ = "2026.13" 
 
 # BSD-3-Clause License
 #
@@ -1638,7 +1638,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # add tabs to tab layout
         self.plot_tabs.addTab(self.plot_tab1, 'Depth')
         self.plot_tabs.addTab(self.plot_tab2, 'Backscatter')
-        self.plot_tabs.addTab(self.plot_tab3, 'Ping Mode')
+        self.plot_tabs.addTab(self.plot_tab3, 'Depth Mode')
         self.plot_tabs.addTab(self.plot_tab4, 'Pulse Form')
         self.plot_tabs.addTab(self.plot_tab5, 'Swath Mode')
         self.plot_tabs.addTab(self.plot_tab6, 'Frequency')
@@ -1716,7 +1716,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # add point color options for swath data (was new data)
         self.show_data_chk = CheckBox('Swath Data', True, 'show_data_chk', 'Show swath data')
         self.new_data_color_by_type_radio = RadioButton('Color by Data', True, 'new_data_color_by_type_radio', 
-                                                       'Color swath data according to the tab type (depth, backscatter, ping mode, etc.)')
+                                                       'Color swath data according to the tab type (depth, backscatter, depth mode, etc.)')
         self.new_data_single_color_radio = RadioButton('Single Color', False, 'new_data_single_color_radio',
                                                       'Use a single color for all swath data')
         self.new_data_color_btn = PushButton('Select Color', 80, 20, 'new_data_color_btn', 'Select solid color for swath data')
@@ -1727,7 +1727,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # add point color options for archive data
         self.show_data_chk_arc = CheckBox('Archive data', False, 'show_data_chk_arc', 'Show archive data')
         self.archive_data_color_by_type_radio = RadioButton('Color by Data', False, 'archive_data_color_by_type_radio',
-                                                           'Color archive data according to the tab type (depth, backscatter, ping mode, etc.)')
+                                                           'Color archive data according to the tab type (depth, backscatter, depth mode, etc.)')
         self.archive_data_single_color_radio = RadioButton('Single Color', True, 'archive_data_single_color_radio',
                                                           'Use a single color for all archive data')
         self.archive_data_color_btn = PushButton('Select Color', 80, 20, 'archive_data_color_btn', 'Select solid color for archive data')
