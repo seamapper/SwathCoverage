@@ -142,7 +142,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setMaximumWidth(1600)
         self.setMaximumHeight(1100)
         self.setWindowTitle('Swath Coverage Plotter v.%s' % __version__ + ' - kjerram@ccom.unh.edu & pjohnson@ccom.unh.edu')
-        self.setWindowIcon(QtGui.QIcon(os.path.join(self.media_path, "icon.png")))
+        self.setWindowIcon(QtGui.QIcon(os.path.join(self.media_path, "mac.ico")))
 
         # Windows-specific taskbar icon configuration
         if os.name == 'nt':  # necessary to explicitly set taskbar icon
@@ -3266,6 +3266,10 @@ def _apply_dark_fusion_theme(app):
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
     _apply_dark_fusion_theme(app)
+
+    window_icon = os.path.join(MainWindow.media_path, 'mac.ico')
+    if os.path.isfile(window_icon):
+        app.setWindowIcon(QtGui.QIcon(window_icon))
 
     main = MainWindow()
     main.show()
