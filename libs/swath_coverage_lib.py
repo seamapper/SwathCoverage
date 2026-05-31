@@ -65,6 +65,7 @@ import os
 import datetime
 import json
 import csv
+import shutil
 
 from matplotlib.colors import ListedColormap
 
@@ -529,6 +530,7 @@ def remove_cov_files(self, clear_all=False):
         self.det = {}
         self.det_archive = {}
         self.spec = {}
+        clear_lasso_exclusions(self)
         update_log(self, 'Cleared all files')
         self.cruise_name_updated = False
         self.model_updated = False
@@ -557,6 +559,7 @@ def remove_cov_files(self, clear_all=False):
 
 def remove_data(self, removed_files):
     # remove data in specified filenames from detection and spec dicts
+    clear_lasso_exclusions(self)
     for f in removed_files:
         try:  # removed_files is a file list object
             fname = f.text().split('/')[-1]
@@ -600,6 +603,7 @@ def update_show_data_checks(self):
 
     if len(fnames_all + fnames_kmall) == 0:  # all new files have been removed
         self.det = {}
+        clear_lasso_exclusions(self)
         self.show_data_chk.setChecked(False)
 
     if len(fnames_pkl) == 0:  # all archives have been removed
@@ -685,8 +689,11 @@ def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_
             sender=sender, validate_filters=validate_filters,
         )
     finally:
-        if filter_text_drafts is not None and hasattr(self, '_restore_filter_text_drafts'):
-            self._restore_filter_text_drafts(filter_text_drafts)
+        if filter_text_drafts is not None:
+            if hasattr(self, '_sync_drafts_with_committed_plot_limits'):
+                self._sync_drafts_with_committed_plot_limits(filter_text_drafts)
+            if hasattr(self, '_restore_filter_text_drafts'):
+                self._restore_filter_text_drafts(filter_text_drafts)
 
 
 def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, validate_filters=True):
@@ -745,9 +752,15 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
                             self.plot_lim_gb.setChecked(True)
                         # Copy Depth filter min/max into custom depth limits (use new-data fields)
                         if hasattr(self, 'min_depth_tb') and hasattr(self, 'min_z_tb'):
-                            self.min_z_tb.setText(self.min_depth_tb.text())
+                            if hasattr(self, '_set_plot_limit_text'):
+                                self._set_plot_limit_text('min_z_tb', self.min_depth_tb.text())
+                            else:
+                                self.min_z_tb.setText(self.min_depth_tb.text())
                         if hasattr(self, 'max_depth_tb') and hasattr(self, 'max_z_tb'):
-                            self.max_z_tb.setText(self.max_depth_tb.text())
+                            if hasattr(self, '_set_plot_limit_text'):
+                                self._set_plot_limit_text('max_z_tb', self.max_depth_tb.text())
+                            else:
+                                self.max_z_tb.setText(self.max_depth_tb.text())
                         # Mark as synced so we don't keep changing these on every refresh
                         self._depth_limits_synced = True
         except Exception:
@@ -771,7 +784,10 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
                         if getattr(self, 'plot_lim_gb', None) and not self.plot_lim_gb.isChecked():
                             self.plot_lim_gb.setChecked(True)
                         if hasattr(self, 'max_width_tb') and hasattr(self, 'max_x_tb'):
-                            self.max_x_tb.setText(self.max_width_tb.text())
+                            if hasattr(self, '_set_plot_limit_text'):
+                                self._set_plot_limit_text('max_x_tb', self.max_width_tb.text())
+                            else:
+                                self.max_x_tb.setText(self.max_width_tb.text())
                         self._width_limits_synced = True
         except Exception:
             pass
@@ -980,6 +996,16 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
     if self.verbose_logging:
         print('calling self.swath_canvas.draw()')
     self.swath_canvas.draw()  # final update for the swath canvas
+    if hasattr(self, '_recreate_lasso_selector_if_active'):
+        try:
+            self._recreate_lasso_selector_if_active()
+        except Exception:
+            pass
+    if hasattr(self, '_update_lasso_action_buttons'):
+        try:
+            self._update_lasso_action_buttons()
+        except Exception:
+            pass
     if self.verbose_logging:
         print('calling self.backscatter_canvas.draw()')
     self.backscatter_canvas.draw()  # final update for the backscatter canvas
@@ -1071,6 +1097,7 @@ def update_show_data_checks_coverage(self):
 
     if len(fnames_all + fnames_kmall) == 0:  # all new files have been removed
         self.det = {}
+        clear_lasso_exclusions(self)
         self.show_data_chk.setChecked(False)
 
     if len(fnames_pkl) == 0:  # all archives have been removed
@@ -1202,6 +1229,84 @@ def add_plot_features(self, ax, is_archive=False):
             # The specification lines are handled by the add_spec_lines function
             pass
 
+
+def clear_lasso_exclusions(self):
+    """Clear session lasso exclusions (swath data only)."""
+    self.lasso_excluded_indices = set()
+    self._lasso_exclude_history = []
+    self._lasso_plot_y = None
+    self._lasso_plot_z = None
+
+
+def cache_lasso_plot_coords(self, y_all, z_all):
+    """Cache pre-filter plot coordinates for lasso selection on swath data."""
+    self._lasso_plot_y = np.asarray(y_all, dtype=float)
+    self._lasso_plot_z = np.asarray(z_all, dtype=float)
+
+
+def build_plot_coords_from_det(self, det):
+    """Build y_all, z_all in the current depth reference frame from a detection dict."""
+    try:
+        y_all = det['y_port'] + det['y_stbd']
+    except Exception:
+        y_all = det['x_port'] + det['x_stbd']
+    z_all = det['z_port'] + det['z_stbd']
+    _dx_ping, dy_ping, dz_ping = adjust_depth_ref(det, depth_ref=self.ref_cbox.currentText().lower())
+    z_all = [z + dz for z, dz in zip(z_all, dz_ping + dz_ping)]
+    y_all = [y + dy for y, dy in zip(y_all, dy_ping + dy_ping)]
+    return y_all, z_all
+
+
+def get_lasso_keep_idx(self, n_points, is_archive):
+    """Return boolean keep-mask (True = keep). Lasso exclusions apply to swath data only."""
+    if is_archive:
+        return np.ones(n_points, dtype=bool)
+    excluded = getattr(self, 'lasso_excluded_indices', None)
+    if not excluded:
+        return np.ones(n_points, dtype=bool)
+    return np.array([i not in excluded for i in range(n_points)], dtype=bool)
+
+
+def apply_lasso_exclusion_verts(self, verts):
+    """Add soundings inside a lasso polygon to the session exclusion set. Returns count newly excluded."""
+    if not verts or len(verts) < 3:
+        return 0
+
+    y_arr = getattr(self, '_lasso_plot_y', None)
+    z_arr = getattr(self, '_lasso_plot_z', None)
+    if y_arr is None or z_arr is None:
+        if not getattr(self, 'det', None):
+            return 0
+        y_all, z_all = build_plot_coords_from_det(self, self.det)
+        y_arr = np.asarray(y_all, dtype=float)
+        z_arr = np.asarray(z_all, dtype=float)
+
+    from matplotlib.path import Path
+    inside = Path(verts).contains_points(np.column_stack([y_arr, z_arr]))
+    new_indices = set(np.where(inside)[0])
+    if not new_indices:
+        return 0
+
+    if not hasattr(self, 'lasso_excluded_indices'):
+        self.lasso_excluded_indices = set()
+    if not hasattr(self, '_lasso_exclude_history'):
+        self._lasso_exclude_history = []
+
+    before = set(self.lasso_excluded_indices)
+    self._lasso_exclude_history.append(before)
+    self.lasso_excluded_indices = before | new_indices
+    return len(self.lasso_excluded_indices - before)
+
+
+def undo_lasso_exclusion(self):
+    """Undo the most recent lasso exclusion. Returns True if an undo was applied."""
+    history = getattr(self, '_lasso_exclude_history', None)
+    if not history:
+        return False
+    self.lasso_excluded_indices = history.pop()
+    return True
+
+
 def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='detection dictionary'):
     # plot the parsed detections from new or archive data dict; return the number of points plotted after filtering
     # tic = process_time()
@@ -1247,6 +1352,9 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
     # print('got dz_ping=', dz_ping)
     z_all = [z + dz for z, dz in zip(z_all, dz_ping + dz_ping)]  # add dz (per ping) to each z (per sounding)
     y_all = [y + dy for y, dy in zip(y_all, dy_ping + dy_ping)]  # add dy (per ping) to each y (per sounding)
+
+    if not is_archive:
+        cache_lasso_plot_coords(self, y_all, z_all)
 
     if print_updates:
         for i in range(len(angle_all)):
@@ -1348,7 +1456,9 @@ def plot_coverage(self, det, is_archive=False, print_updates=False, det_name='de
             update_log(self, 'Failure comparing coverage to runtime params; no coverage filter applied')
 
     # apply filter masks to x, z, angle, and bs fields
-    filter_idx = np.logical_and.reduce((angle_idx, depth_idx, width_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx))
+    lasso_keep_idx = get_lasso_keep_idx(self, len(y_all), is_archive)
+    filter_idx = np.logical_and.reduce(
+        (angle_idx, depth_idx, width_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx, lasso_keep_idx))
 
     # Update x and z max for axis resizing.
     # If Angle/Depth/Backscatter filters are enabled and custom plot limits are OFF,
@@ -2078,6 +2188,9 @@ def calc_coverage(self, params_only=False):
             self.data_new = interpretMode(self, data_new, print_updates=self.print_updates)  # True)
             det_new = sortDetectionsCoverage(self, data_new, print_updates=self.print_updates, params_only=params_only)  # True)
 
+            if det_new.get('fname'):
+                clear_lasso_exclusions(self)
+
             if len(self.det) == 0:  # if detection dict is empty with no keys, store new detection dict
                 self.det = det_new
                 update_log(self, f"Created new detection dictionary with {len(det_new)} keys")
@@ -2779,20 +2892,37 @@ def update_plot_limits(self):
     else:  # revert to automatic limits from the data if unchecked, but keep the custom numbers in text boxes
         self.plot_lim_gb.setChecked(False)
         if self.x_max_custom > 0:
-            self.max_x_tb.setText(str(int(self.x_max_custom)))
-        elif hasattr(self, 'max_x_tb'):
-            self.max_x_tb.setText('')
-        if hasattr(self, 'min_z_tb'):
-            if hasattr(self, 'z_min_custom'):
-                self.min_z_tb.setText(str(int(self.z_min_custom)))
+            if hasattr(self, '_set_plot_limit_text'):
+                self._set_plot_limit_text('max_x_tb', str(int(self.x_max_custom)))
             else:
-                self.min_z_tb.setText('0')
+                self.max_x_tb.setText(str(int(self.x_max_custom)))
+        elif hasattr(self, 'max_x_tb'):
+            if hasattr(self, '_set_plot_limit_text'):
+                self._set_plot_limit_text('max_x_tb', '')
+            else:
+                self.max_x_tb.setText('')
+        if hasattr(self, 'min_z_tb'):
+            min_z_text = str(int(self.z_min_custom)) if hasattr(self, 'z_min_custom') else '0'
+            if hasattr(self, '_set_plot_limit_text'):
+                self._set_plot_limit_text('min_z_tb', min_z_text)
+            else:
+                self.min_z_tb.setText(min_z_text)
         if self.z_max_custom > 0:
-            self.max_z_tb.setText(str(int(self.z_max_custom)))
+            if hasattr(self, '_set_plot_limit_text'):
+                self._set_plot_limit_text('max_z_tb', str(int(self.z_max_custom)))
+            else:
+                self.max_z_tb.setText(str(int(self.z_max_custom)))
         elif hasattr(self, 'max_z_tb'):
-            self.max_z_tb.setText('')
-        self.max_dr_tb.setText(str(int(self.dr_max_custom)))
-        self.max_pi_tb.setText(str(int(self.pi_max_custom)))
+            if hasattr(self, '_set_plot_limit_text'):
+                self._set_plot_limit_text('max_z_tb', '')
+            else:
+                self.max_z_tb.setText('')
+        if hasattr(self, '_set_plot_limit_text'):
+            self._set_plot_limit_text('max_dr_tb', str(int(self.dr_max_custom)))
+            self._set_plot_limit_text('max_pi_tb', str(int(self.pi_max_custom)))
+        else:
+            self.max_dr_tb.setText(str(int(self.dr_max_custom)))
+            self.max_pi_tb.setText(str(int(self.pi_max_custom)))
 
     if hasattr(self, '_sync_plot_limit_textbox_commits'):
         self._sync_plot_limit_textbox_commits()
@@ -3377,7 +3507,97 @@ def save_all_plots(self):
     update_log(self, f'Successfully exported analysis group with {saved_count} out of {len(plot_types)} plots to: {save_dir}')
 
 
-def _collect_analysis_source_files(self):
+def _unique_spec_display_name(self, basename):
+    """Return a list/spec dict key that is unique among loaded spec curves."""
+    if not hasattr(self, 'spec_file_list'):
+        return basename
+    existing = {self.spec_file_list.item(i).text() for i in range(self.spec_file_list.count())}
+    if basename not in existing:
+        return basename
+    stem, ext = os.path.splitext(basename)
+    n = 2
+    while True:
+        candidate = f"{stem}_{n}{ext}"
+        if candidate not in existing:
+            return candidate
+        n += 1
+
+
+def _get_loaded_spec_curve_paths(self):
+    """Return full paths for each spec curve in list order."""
+    paths = []
+    if not hasattr(self, 'spec_file_list'):
+        return paths
+    spec_source_paths = getattr(self, 'spec_source_paths', {})
+    for i in range(self.spec_file_list.count()):
+        item = self.spec_file_list.item(i)
+        display_name = item.text()
+        path = item.data(1)
+        if path:
+            path = os.path.normpath(str(path))
+        if not path or not os.path.isfile(path):
+            path = spec_source_paths.get(display_name)
+            if path:
+                path = os.path.normpath(str(path))
+        if (not path or not os.path.isfile(path)) and os.path.isfile(display_name):
+            path = os.path.normpath(display_name)
+        if path and os.path.isfile(path):
+            paths.append(path)
+    return paths
+
+
+def _collect_spec_curve_files_for_export(self, export_dir=None):
+    """Collect spec curve paths for analysis export; optionally copy into export_dir/spec_curves."""
+    source_paths = _get_loaded_spec_curve_paths(self)
+    if not source_paths:
+        return []
+
+    if not export_dir:
+        return source_paths
+
+    export_subdir = os.path.join(export_dir, 'spec_curves')
+    os.makedirs(export_subdir, exist_ok=True)
+    exported_paths = []
+    used_names = set()
+
+    for source_path in source_paths:
+        base = os.path.basename(source_path)
+        dest_name = base
+        stem, ext = os.path.splitext(base)
+        n = 2
+        while dest_name.lower() in used_names:
+            dest_name = f"{stem}_{n}{ext}"
+            n += 1
+        used_names.add(dest_name.lower())
+        dest_path = os.path.join(export_subdir, dest_name)
+        try:
+            shutil.copy2(source_path, dest_path)
+            exported_paths.append(os.path.join('spec_curves', dest_name).replace('\\', '/'))
+        except Exception as e:
+            update_log(self, f'Error copying spec curve {base}: {str(e)}')
+            exported_paths.append(source_path)
+
+    if exported_paths:
+        update_log(self, f'Exported {len(exported_paths)} spec curve file(s) to spec_curves/')
+    return exported_paths
+
+
+def _resolve_analysis_source_path(path, json_dir):
+    """Resolve an exported source path, preferring paths relative to the analysis JSON directory."""
+    if not path:
+        return path
+    path_str = str(path)
+    if os.path.isfile(path_str):
+        return os.path.normpath(path_str)
+    rel_path = path_str.replace('\\', '/')
+    if json_dir:
+        candidate = os.path.normpath(os.path.join(json_dir, rel_path.replace('/', os.sep)))
+        if os.path.isfile(candidate):
+            return candidate
+    return path_str
+
+
+def _collect_analysis_source_files(self, export_dir=None):
     def _list_from_widget(widget_attr, original_paths_attr=None, data_role=None):
         files = []
         if not hasattr(self, widget_attr):
@@ -3404,12 +3624,7 @@ def _collect_analysis_source_files(self):
     if not archive_pkl_files:
         archive_pkl_files = _list_from_widget('archive_file_list', 'original_archive_paths')
 
-    spec_source_paths = getattr(self, 'spec_source_paths', {})
-    spec_curve_files = []
-    if hasattr(self, 'spec_file_list'):
-        for i in range(self.spec_file_list.count()):
-            spec_name = self.spec_file_list.item(i).text()
-            spec_curve_files.append(spec_source_paths.get(spec_name, spec_name))
+    spec_curve_files = _collect_spec_curve_files_for_export(self, export_dir)
 
     return {
         'raw_files': raw_files,
@@ -3501,9 +3716,9 @@ def _collect_analysis_settings(self):
 def save_analysis_group_json(self, save_dir, save_name):
     analysis_file = os.path.join(save_dir, f"{save_name}_analysis_group.json")
     analysis_payload = {
-        'analysis_group_version': '1.0',
+        'analysis_group_version': '1.1',
         'exported_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'source_files': _collect_analysis_source_files(self)
+        'source_files': _collect_analysis_source_files(self, export_dir=save_dir)
     }
     analysis_payload.update(_collect_analysis_settings(self))
 
@@ -3545,7 +3760,7 @@ def save_settings_info(self, save_dir, save_name):
             # Source files by type
             f.write("SOURCE FILES:\n")
             f.write("-" * 15 + "\n")
-            source_files = _collect_analysis_source_files(self)
+            source_files = _collect_analysis_source_files(self, export_dir=save_dir)
             raw_files = source_files.get('raw_files', [])
             swath_pkl_files = source_files.get('swath_pkl_files', [])
             archive_pkl_files = source_files.get('archive_pkl_files', [])
@@ -3888,14 +4103,15 @@ def import_analysis_group(self):
 
     _apply_analysis_settings(self, payload)
 
-    source_files = payload.get('source_files', {})
+    json_dir = os.path.dirname(os.path.abspath(json_path))
 
     def _existing_paths(paths, label):
         existing = []
         missing = []
         for p in paths:
-            if p and os.path.exists(p):
-                existing.append(p)
+            resolved = _resolve_analysis_source_path(p, json_dir)
+            if resolved and os.path.exists(resolved):
+                existing.append(resolved)
             elif p:
                 missing.append(p)
         if missing:
@@ -3903,6 +4119,8 @@ def import_analysis_group(self):
             for missing_path in missing:
                 update_log(self, f'  Missing: {missing_path}')
         return existing
+
+    source_files = payload.get('source_files', {})
 
     raw_files = _existing_paths(source_files.get('raw_files', []), 'Raw files')
     swath_pkl_files = _existing_paths(source_files.get('swath_pkl_files', []), 'Swath PKL files')
@@ -4325,55 +4543,59 @@ def load_spec_files(self, fnames_new_spec):
     if not hasattr(self, 'spec_colors'):
         self.spec_colors = {}
     
-    fnames_new_spec = sorted(fnames_new_spec)
+    fnames_new_spec = sorted({os.path.normpath(str(p)) for p in fnames_new_spec})
     
-    for i in range(len(fnames_new_spec)):
-        # try to load archive data and extend the det_archive
-        fname_str = fnames_new_spec[i].split('/')[-1]  # strip just the file string for key in spec dict
-        update_log(self, 'Parsing ' + fname_str)
+    for file_path in fnames_new_spec:
+        basename = os.path.basename(file_path)
+        update_log(self, 'Parsing ' + basename)
 
-        try:  # try reading file
-            f = open(fnames_new_spec[i], 'r')
-            data = f.readlines()
+        # Skip if this exact file is already loaded
+        already_loaded = False
+        if hasattr(self, 'spec_file_list'):
+            for idx in range(self.spec_file_list.count()):
+                existing_path = self.spec_file_list.item(idx).data(1)
+                if existing_path and os.path.normpath(str(existing_path)) == file_path:
+                    already_loaded = True
+                    break
+        if already_loaded:
+            update_log(self, f'Specification curve already loaded: {basename}')
+            continue
 
-        except:
-            
-            print('***WARNING: Error reading file', fname_str)
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                data = f.readlines()
+        except Exception:
+            print('***WARNING: Error reading file', basename)
+            continue
 
-        if len(data) <= 0:  # skip if text file is empty
-            print('***WARNING: No data read from file', fname_str)
+        if len(data) <= 0:
+            print('***WARNING: No data read from file', basename)
+            continue
 
-        else:  # try to read spec name from header and z, x data as arrays
-            specarray = np.genfromtxt(fnames_new_spec[i], skip_header=1, delimiter=',')
-            self.spec[fname_str] = {}
-            self.spec[fname_str]['spec_name'] = data[0].replace('\n', '')  # header includes name of spec
-            self.spec[fname_str]['z'] = specarray[:, 0]  # first column is depth in m
-            self.spec[fname_str]['x'] = specarray[:, 1]  # second column is total coverage in m
-            
-            # Assign unique color to this spec curve
-            if hasattr(self, 'spec_colors') and hasattr(self, 'spec_color_palette'):
-                color_index = len(self.spec_colors) % len(self.spec_color_palette)
-                self.spec_colors[fname_str] = self.spec_color_palette[color_index]
-            
-            # Add to specification curves file list (check for duplicates)
-            if hasattr(self, 'spec_file_list'):
-                # Check if file is already in the list
-                already_exists = False
-                for i in range(self.spec_file_list.count()):
-                    if self.spec_file_list.item(i).text() == fname_str:
-                        already_exists = True
-                        break
-                
-                if not already_exists:
-                    self.spec_file_list.addItem(fname_str)
-                    self.spec_source_paths[fname_str] = fnames_new_spec[i]
-                    # Debug: Log file addition
-                    if hasattr(self, 'update_log'):
-                        self.update_log(f"Added {fname_str} to Specification Curves list")
-                else:
-                    self.spec_source_paths[fname_str] = fnames_new_spec[i]
-                    if hasattr(self, 'update_log'):
-                        self.update_log(f"Specification curve {fname_str} already loaded")
+        try:
+            specarray = np.genfromtxt(file_path, skip_header=1, delimiter=',')
+        except Exception as e:
+            update_log(self, f'Failed to parse spec curve {basename}: {str(e)}')
+            continue
+
+        list_name = _unique_spec_display_name(self, basename)
+        self.spec[list_name] = {
+            'spec_name': data[0].replace('\n', ''),
+            'z': specarray[:, 0],
+            'x': specarray[:, 1],
+        }
+
+        if hasattr(self, 'spec_colors') and hasattr(self, 'spec_color_palette'):
+            color_index = len(self.spec_colors) % len(self.spec_color_palette)
+            self.spec_colors[list_name] = self.spec_color_palette[color_index]
+
+        self.spec_source_paths[list_name] = file_path
+
+        if hasattr(self, 'spec_file_list'):
+            item = QtWidgets.QListWidgetItem(list_name)
+            item.setData(1, file_path)
+            self.spec_file_list.addItem(item)
+            update_log(self, f'Added {list_name} to Specification Curves list')
 
     self.spec_chk.setChecked(True)
     refresh_plot(self, call_source='load_spec')
@@ -6364,7 +6586,9 @@ def plot_backscatter(self, det, is_archive=False, print_updates=False, det_name=
             update_log(self, 'Failure comparing coverage to runtime params; no coverage filter applied')
 
     # apply filter masks to x, z, angle, and bs fields
-    filter_idx = np.logical_and.reduce((angle_idx, depth_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx))
+    lasso_keep_idx = get_lasso_keep_idx(self, len(y_all), is_archive)
+    filter_idx = np.logical_and.reduce(
+        (angle_idx, depth_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx, lasso_keep_idx))
 
     # Determine color mode based on radio button selection
     if is_archive:
@@ -6620,7 +6844,9 @@ def plot_pingmode(self, det, is_archive=False, print_updates=False, det_name='de
             update_log(self, 'Failure comparing coverage to runtime params; no coverage filter applied')
 
     # apply filter masks to x, z, angle, and bs fields
-    filter_idx = np.logical_and.reduce((angle_idx, depth_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx))
+    lasso_keep_idx = get_lasso_keep_idx(self, len(y_all), is_archive)
+    filter_idx = np.logical_and.reduce(
+        (angle_idx, depth_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx, lasso_keep_idx))
 
     # Determine color mode based on radio button selection
     if is_archive:
@@ -6858,7 +7084,9 @@ def plot_pulseform(self, det, is_archive=False, print_updates=False, det_name='d
             update_log(self, 'Failure comparing coverage to runtime params; no coverage filter applied')
 
     # apply filter masks to x, z, angle, and bs fields
-    filter_idx = np.logical_and.reduce((angle_idx, depth_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx))
+    lasso_keep_idx = get_lasso_keep_idx(self, len(y_all), is_archive)
+    filter_idx = np.logical_and.reduce(
+        (angle_idx, depth_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx, lasso_keep_idx))
 
     # Determine color mode based on radio button selection
     if is_archive:
@@ -7114,7 +7342,9 @@ def plot_swathmode(self, det, is_archive=False, print_updates=False, det_name='d
             update_log(self, 'Failure comparing coverage to runtime params; no coverage filter applied')
 
     # apply filter masks to x, z, angle, and bs fields
-    filter_idx = np.logical_and.reduce((angle_idx, depth_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx))
+    lasso_keep_idx = get_lasso_keep_idx(self, len(y_all), is_archive)
+    filter_idx = np.logical_and.reduce(
+        (angle_idx, depth_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx, lasso_keep_idx))
 
     # Determine color mode based on radio button selection
     if is_archive:
@@ -7406,7 +7636,9 @@ def plot_frequency(self, det, is_archive=False, print_updates=False, det_name='d
             update_log(self, 'Failure comparing coverage to runtime params; no coverage filter applied')
 
     # apply filter masks to x, z, angle, and bs fields
-    filter_idx = np.logical_and.reduce((angle_idx, depth_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx))
+    lasso_keep_idx = get_lasso_keep_idx(self, len(y_all), is_archive)
+    filter_idx = np.logical_and.reduce(
+        (angle_idx, depth_idx, bs_idx, rtp_angle_idx, rtp_cov_idx, real_idx, lasso_keep_idx))
 
     # filter the data after storing the color data
     y_all = np.asarray(y_all)[filter_idx].tolist()
@@ -8517,6 +8749,7 @@ def load_swath_pkl(self):
                     
                     # Sort detections to extract swath mode and other required fields
                     update_log(self, "Extracting detection data and swath mode information...")
+                    clear_lasso_exclusions(self)
                     self.det = sortDetectionsCoverage(self, data_list, print_updates=self.print_updates)
                     
                     # Add missing detection fields to loaded pickle files for backward compatibility

@@ -75,6 +75,7 @@ import traceback
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+from matplotlib.widgets import LassoSelector
 from libs.gui_widgets import *
 try:
     from .libs.swath_coverage_lib import *
@@ -234,6 +235,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.trend_bin_means = []
         self.trend_bin_centers_arc = []
         self.trend_bin_means_arc = []
+        self.lasso_excluded_indices = set()
+        self._lasso_exclude_history = []
+        self._lasso_plot_y = None
+        self._lasso_plot_z = None
+        self._lasso_active = False
+        self._lasso_selector = None
         self.c_all_data_rate = []
         self.c_all_data_rate_arc = []
         
@@ -628,6 +635,30 @@ class MainWindow(QtWidgets.QMainWindow):
             if widget is not None:
                 self._commit_line_edit_text(widget)
 
+    def _set_plot_limit_text(self, widget_name, text):
+        """Set a custom plot limit field programmatically and treat it as committed."""
+        widget = getattr(self, widget_name, None)
+        if widget is None:
+            return
+        widget.blockSignals(True)
+        widget.setText('' if text is None else str(text))
+        widget.blockSignals(False)
+        self._commit_line_edit_text(widget)
+
+    def _sync_drafts_with_committed_plot_limits(self, drafts):
+        """Prevent auto-synced plot limit values from reverting to stale user drafts."""
+        if not drafts:
+            return
+        for name in self.PLOT_LIMIT_TEXTBOX_NAMES:
+            if name not in drafts:
+                continue
+            widget = self._filter_line_edits.get(name)
+            if widget is None:
+                continue
+            committed = self._filter_text_committed.get(name)
+            if committed is not None and widget.text() == committed:
+                drafts[name] = widget.text()
+
     def _sync_committed_filter_text_from_widgets(self):
         """Align committed filter text with widget display (e.g. after import)."""
         if not hasattr(self, '_filter_line_edits'):
@@ -639,10 +670,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_committed_filter_text(self):
         """Temporarily show committed values in line edits for plot/filter logic."""
         drafts = {}
-        skip = self.PLOT_LIMIT_TEXTBOX_NAMES
         for name, widget in self._filter_line_edits.items():
-            if name in skip:
-                continue
             committed = self._filter_text_committed.get(name, widget.text())
             drafts[name] = widget.text()
             if drafts[name] != committed:
@@ -653,10 +681,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _restore_filter_text_drafts(self, drafts):
         """Restore in-progress edits after refresh_plot uses committed values."""
-        skip = self.PLOT_LIMIT_TEXTBOX_NAMES
         for name, draft in drafts.items():
-            if name in skip:
-                continue
             widget = self._filter_line_edits.get(name)
             if widget is not None and widget.text() != draft:
                 widget.blockSignals(True)
@@ -667,12 +692,18 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_filter_line_edit_return(self, tb):
         """Apply a line-edit value when the user presses Enter."""
         self._commit_line_edit_text(tb)
+        if tb.objectName() in ('ship_tb', 'cruise_tb') and tb.text().strip():
+            if hasattr(self, 'custom_info_gb') and not self.custom_info_gb.isChecked():
+                self.custom_info_gb.blockSignals(True)
+                self.custom_info_gb.setChecked(True)
+                self.custom_info_gb.blockSignals(False)
+                self.update_filter_widget_styling()
         refresh_plot(self, sender=tb.objectName())
 
     def _schedule_filter_update(self, sender=None, delay_ms=5000):
-        """Debounce expensive filter-driven updates so we only process once after the user pauses.
+        """Debounce plot refreshes for checkboxes, comboboxes, and radio buttons.
 
-        Used for groupboxes, checkboxes, comboboxes, and radio buttons (not line edits).
+        Line-edit parameter fields always require Enter to commit; they are not scheduled here.
         """
         # Lazily create the timer the first time we need it
         if self.filter_update_timer is None:
@@ -2228,8 +2259,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show_coverage_trend_chk = CheckBox('Show Coverage Trend', False, 'show_cov_trend_chk',
                                                 'When checked, display the coverage trend points on the depth plot.')
 
+        self.lasso_remove_btn = PushButton(
+            'Lasso Remove', 120, 20, 'lasso_remove_btn',
+            'Draw a freehand region on the Depth plot to exclude swath soundings from plots, '
+            'trend calculations, and exports.'
+        )
+        self.lasso_remove_btn.clicked.connect(self._handle_lasso_remove_clicked)
+        self.lasso_clear_btn = PushButton(
+            'Clear Lasso Exclusions', 160, 20, 'lasso_clear_btn',
+            'Remove all lasso exclusions for the current session.'
+        )
+        self.lasso_clear_btn.clicked.connect(self._handle_lasso_clear_clicked)
+        self.lasso_undo_btn = PushButton(
+            'Undo Lasso', 100, 20, 'lasso_undo_btn',
+            'Undo the most recent lasso exclusion.'
+        )
+        self.lasso_undo_btn.clicked.connect(self._handle_lasso_undo_clicked)
+        self.lasso_clear_btn.setEnabled(False)
+        self.lasso_undo_btn.setEnabled(False)
 
-
+        lasso_btn_layout = BoxLayout([self.lasso_remove_btn, self.lasso_clear_btn, self.lasso_undo_btn], 'v')
+        self.lasso_gb = GroupBox('Lasso Remove', lasso_btn_layout, False, False, 'lasso_gb')
 
         toggle_chk_layout = BoxLayout([self.show_ref_fil_chk, self.show_spec_legend_chk, self.grid_lines_toggle_chk, self.colorbar_chk,
                                        self.spec_chk, self.show_hist_chk,
@@ -2273,7 +2323,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # set up tab 2: filtering options
         self.tab2 = QtWidgets.QWidget()
-        self.tab2_layout = BoxLayout([self.angle_gb, self.depth_gb, self.width_gb, self.bs_gb, self.ping_int_gb, self.rtp_angle_gb,
+        self.tab2_layout = BoxLayout([self.lasso_gb, self.angle_gb, self.depth_gb, self.width_gb, self.bs_gb, self.ping_int_gb, self.rtp_angle_gb,
                                       self.rtp_cov_gb, self.pt_count_gb, self.swath_pkl_dec_gb], 'v')
         self.tab2_layout.addStretch()
         self.tab2.setLayout(self.tab2_layout)
@@ -2497,7 +2547,152 @@ class MainWindow(QtWidgets.QMainWindow):
         if getattr(self, '_trend_digitizing', False):
             self._stop_digitize_trend()
         else:
+            if getattr(self, '_lasso_active', False):
+                self._stop_lasso_remove()
             self._start_digitize_trend()
+
+    def _update_lasso_action_buttons(self):
+        has_exclusions = bool(getattr(self, 'lasso_excluded_indices', None))
+        has_history = bool(getattr(self, '_lasso_exclude_history', None))
+        if hasattr(self, 'lasso_clear_btn'):
+            self.lasso_clear_btn.setEnabled(has_exclusions)
+        if hasattr(self, 'lasso_undo_btn'):
+            self.lasso_undo_btn.setEnabled(has_history)
+
+    def _set_swath_toolbar_pan_zoom_enabled(self, enabled):
+        """Enable or disable pan/zoom on the Depth plot toolbar."""
+        tb = getattr(self, 'swath_toolbar', None)
+        if tb is None:
+            return
+        if not enabled:
+            if getattr(tb, 'mode', ''):
+                tb.mode = ''
+            if getattr(tb, '_active', None) is not None:
+                tb._active = None
+            try:
+                tb.canvas.widgetlock.release(tb)
+            except Exception:
+                pass
+        for action in tb.actions():
+            if action.text() in ('Pan', 'Zoom'):
+                action.setEnabled(enabled)
+
+    def _clear_lasso_line(self):
+        """Remove the visible lasso path from the Depth plot."""
+        selector = getattr(self, '_lasso_selector', None)
+        if selector is None:
+            return
+        try:
+            selector.clear()
+        except Exception:
+            pass
+        if hasattr(self, 'swath_canvas'):
+            self.swath_canvas.draw_idle()
+
+    def _recreate_lasso_selector_if_active(self):
+        if not getattr(self, '_lasso_active', False):
+            return
+        if not hasattr(self, 'swath_ax'):
+            return
+        selector = getattr(self, '_lasso_selector', None)
+        if selector is not None:
+            try:
+                selector.clear()
+                selector.disconnect_events()
+            except Exception:
+                pass
+        self._lasso_selector = LassoSelector(
+            self.swath_ax,
+            onselect=self._on_lasso_select,
+            useblit=True,
+            props=dict(color='crimson', linewidth=1.5, alpha=0.35),
+        )
+
+    def _handle_lasso_remove_clicked(self):
+        if getattr(self, '_lasso_active', False):
+            self._stop_lasso_remove()
+        else:
+            self._start_lasso_remove()
+
+    def _start_lasso_remove(self):
+        if not hasattr(self, 'swath_ax') or not getattr(self, 'det', None):
+            self.update_log('Load swath data before using Lasso Remove.', 'orange')
+            return
+        if getattr(self, '_trend_digitizing', False):
+            self._stop_digitize_trend()
+        self._lasso_active = True
+        self.lasso_remove_btn.setText('Lasso active. Click here to stop.')
+        self._set_swath_toolbar_pan_zoom_enabled(False)
+        try:
+            self._lasso_selector = LassoSelector(
+                self.swath_ax,
+                onselect=self._on_lasso_select,
+                useblit=True,
+                props=dict(color='crimson', linewidth=1.5, alpha=0.35),
+            )
+        except Exception as exc:
+            self._lasso_active = False
+            self.lasso_remove_btn.setText('Lasso Remove')
+            self._set_swath_toolbar_pan_zoom_enabled(True)
+            self.update_log(f'Failed to start lasso mode: {exc}', 'red')
+        else:
+            self.update_log('Lasso Remove active: draw on the Depth plot to exclude soundings.', 'blue')
+
+    def _on_lasso_select(self, verts):
+        if not getattr(self, '_lasso_active', False):
+            return
+        try:
+            n_new = apply_lasso_exclusion_verts(self, verts)
+        except Exception as exc:
+            self.update_log(f'Lasso exclusion failed: {exc}', 'red')
+            self._clear_lasso_line()
+            return
+        self._clear_lasso_line()
+        if n_new:
+            total = len(getattr(self, 'lasso_excluded_indices', set()))
+            self.update_log(
+                f'Lasso excluded {n_new} sounding(s) ({total} total this session).', 'green')
+            self._invalidate_decimation_cache()
+            refresh_plot(self, call_source='lasso_remove')
+        else:
+            self.update_log('No soundings found inside lasso region.', 'orange')
+        self._update_lasso_action_buttons()
+
+    def _stop_lasso_remove(self):
+        self._lasso_active = False
+        selector = getattr(self, '_lasso_selector', None)
+        if selector is not None:
+            try:
+                selector.clear()
+                selector.disconnect_events()
+            except Exception:
+                pass
+        self._lasso_selector = None
+        if hasattr(self, 'lasso_remove_btn'):
+            self.lasso_remove_btn.setText('Lasso Remove')
+        self._set_swath_toolbar_pan_zoom_enabled(True)
+
+    def _handle_lasso_clear_clicked(self):
+        if getattr(self, '_lasso_active', False):
+            self._stop_lasso_remove()
+        if not getattr(self, 'lasso_excluded_indices', None):
+            return
+        clear_lasso_exclusions(self)
+        self._update_lasso_action_buttons()
+        self._invalidate_decimation_cache()
+        refresh_plot(self, call_source='lasso_clear')
+        self.update_log('Cleared all lasso exclusions.', 'blue')
+
+    def _handle_lasso_undo_clicked(self):
+        if getattr(self, '_lasso_active', False):
+            self._stop_lasso_remove()
+        if not undo_lasso_exclusion(self):
+            return
+        self._update_lasso_action_buttons()
+        self._invalidate_decimation_cache()
+        refresh_plot(self, call_source='lasso_undo')
+        total = len(getattr(self, 'lasso_excluded_indices', set()))
+        self.update_log(f'Undid last lasso exclusion ({total} excluded remaining).', 'blue')
 
     def _handle_clear_all_trend_points(self):
         """Clear all (depth,width) points in the Trend table for the selected source."""
@@ -3018,6 +3213,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 
                 # Sort detections
                 det_new = sortDetectionsCoverage(self, data_list, print_updates=self.print_updates, params_only=False)
+
+                if det_new.get('fname'):
+                    clear_lasso_exclusions(self)
                 
                 # Merge with existing detection dictionary
                 if len(self.det) == 0:
