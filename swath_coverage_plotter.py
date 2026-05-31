@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.14" 
+__version__ = "2026.15" 
 
 # BSD-3-Clause License
 #
@@ -90,12 +90,40 @@ except ImportError:
 import matplotlib.pyplot as plt
 
 
+class ResizableFigureCanvas(FigureCanvas):
+    """Figure canvas that sizes to its layout slot instead of figure inches * dpi."""
+
+    def sizeHint(self):
+        return QtCore.QSize(0, 0)
+
+    def minimumSizeHint(self):
+        return QtCore.QSize(0, 0)
+
 
 class MainWindow(QtWidgets.QMainWindow):
     # Auto-updated from loaded data; not pinned via commit/restore overlay during refresh.
     PLOT_LIMIT_TEXTBOX_NAMES = frozenset({
         'min_z_tb', 'max_z_tb', 'max_x_tb', 'max_dr_tb', 'max_pi_tb',
     })
+    # Preferred panel content size; scrollbars appear when the viewport is smaller.
+    WINDOW_DEFAULT_HEIGHT = 1100
+    # Side columns keep content height at the default window size; scroll vertically below that.
+    PANEL_SIDE_MIN_HEIGHT = WINDOW_DEFAULT_HEIGHT - 40
+    PANEL_MIN_LEFT = (325, PANEL_SIDE_MIN_HEIGHT)
+    TAB_PANEL_WIDTH = 300
+    PANEL_MIN_RIGHT = (TAB_PANEL_WIDTH, PANEL_SIDE_MIN_HEIGHT)
+    CENTER_OPEN_WIDTH = 950
+    CENTER_MIN_HEIGHT = 880
+    # No minimum width: panel tracks the viewport so a vertical scrollbar cannot
+    # steal width and force an unwanted horizontal scrollbar at default size.
+    PANEL_MIN_CENTER = (0, CENTER_MIN_HEIGHT)
+    PANEL_MIN_CENTER_VIEWPORT = 240
+    LAYOUT_WIDTH_MARGIN = 40  # main layout spacing/margins between the three columns
+    WINDOW_DEFAULT = (
+        PANEL_MIN_LEFT[0] + PANEL_MIN_RIGHT[0] + CENTER_OPEN_WIDTH + LAYOUT_WIDTH_MARGIN,
+        WINDOW_DEFAULT_HEIGHT,
+    )
+    WINDOW_MIN = (PANEL_MIN_LEFT[0] + PANEL_MIN_RIGHT[0] + PANEL_MIN_CENTER_VIEWPORT, 480)
 
     """
     Main application window for the Swath Coverage Plotter.
@@ -138,10 +166,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Configure main window properties
         self.mainWidget = QtWidgets.QWidget(self)
         self.setCentralWidget(self.mainWidget)
-        self.setMinimumWidth(1600)
-        self.setMinimumHeight(1100)
-        self.setMaximumWidth(1600)
-        self.setMaximumHeight(1100)
+        self.setMinimumWidth(self.WINDOW_MIN[0])
+        self.setMinimumHeight(self.WINDOW_MIN[1])
         self.setWindowTitle('Swath Coverage Plotter v.%s' % __version__ + ' - kjerram@ccom.unh.edu & pjohnson@ccom.unh.edu')
         self.setWindowIcon(QtGui.QIcon(os.path.join(self.media_path, "mac.ico")))
 
@@ -1159,7 +1185,7 @@ class MainWindow(QtWidgets.QMainWindow):
         specifications_layout.addWidget(spec_btn_gb)
         specifications_layout.addStretch()
         specifications_widget.setLayout(specifications_layout)
-        self.sources_tab_widget.addTab(specifications_widget, "Spec Curve")
+        self.sources_tab_widget.addTab(specifications_widget, "Models")
         
         # Create sources group box containing the tabbed widget
         file_gb = GroupBox('Sources', BoxLayout([self.sources_tab_widget], 'v'), False, False, 'file_gb')
@@ -1636,9 +1662,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.swath_canvas_height = 14
         self.swath_canvas_width = 12
         self.swath_figure = Figure(figsize=(self.swath_canvas_width, self.swath_canvas_height))  # figure instance
-        self.swath_canvas = FigureCanvas(self.swath_figure)  # canvas widget that displays the figure
-        self.swath_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
-                                        QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        self.swath_canvas = ResizableFigureCanvas(self.swath_figure)  # canvas widget that displays the figure
+        self.swath_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                        QtWidgets.QSizePolicy.Policy.Expanding)
         self.swath_toolbar = NavigationToolbar(self.swath_canvas, self)  # swath plot toolbar
         self.swath_layout = BoxLayout([self.swath_toolbar, self.swath_canvas], 'v')
 
@@ -1646,9 +1672,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.backscatter_canvas_height = 14
         self.backscatter_canvas_width = 12
         self.backscatter_figure = Figure(figsize=(self.backscatter_canvas_width, self.backscatter_canvas_height))
-        self.backscatter_canvas = FigureCanvas(self.backscatter_figure)
-        self.backscatter_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
-                                              QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        self.backscatter_canvas = ResizableFigureCanvas(self.backscatter_figure)
+        self.backscatter_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                              QtWidgets.QSizePolicy.Policy.Expanding)
         self.backscatter_toolbar = NavigationToolbar(self.backscatter_canvas, self)
         self.backscatter_layout = BoxLayout([self.backscatter_toolbar, self.backscatter_canvas], 'v')
 
@@ -1656,9 +1682,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pingmode_canvas_height = 14
         self.pingmode_canvas_width = 12
         self.pingmode_figure = Figure(figsize=(self.pingmode_canvas_width, self.pingmode_canvas_height))
-        self.pingmode_canvas = FigureCanvas(self.pingmode_figure)
-        self.pingmode_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
-                                           QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        self.pingmode_canvas = ResizableFigureCanvas(self.pingmode_figure)
+        self.pingmode_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                           QtWidgets.QSizePolicy.Policy.Expanding)
         self.pingmode_toolbar = NavigationToolbar(self.pingmode_canvas, self)
         self.pingmode_layout = BoxLayout([self.pingmode_toolbar, self.pingmode_canvas], 'v')
 
@@ -1666,9 +1692,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pulseform_canvas_height = 14
         self.pulseform_canvas_width = 12
         self.pulseform_figure = Figure(figsize=(self.pulseform_canvas_width, self.pulseform_canvas_height))
-        self.pulseform_canvas = FigureCanvas(self.pulseform_figure)
-        self.pulseform_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
-                                            QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        self.pulseform_canvas = ResizableFigureCanvas(self.pulseform_figure)
+        self.pulseform_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                            QtWidgets.QSizePolicy.Policy.Expanding)
         self.pulseform_toolbar = NavigationToolbar(self.pulseform_canvas, self)
         self.pulseform_layout = BoxLayout([self.pulseform_toolbar, self.pulseform_canvas], 'v')
 
@@ -1676,9 +1702,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.swathmode_canvas_height = 14
         self.swathmode_canvas_width = 12
         self.swathmode_figure = Figure(figsize=(self.swathmode_canvas_width, self.swathmode_canvas_height))
-        self.swathmode_canvas = FigureCanvas(self.swathmode_figure)
-        self.swathmode_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
-                                            QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        self.swathmode_canvas = ResizableFigureCanvas(self.swathmode_figure)
+        self.swathmode_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                            QtWidgets.QSizePolicy.Policy.Expanding)
         self.swathmode_toolbar = NavigationToolbar(self.swathmode_canvas, self)
         self.swathmode_layout = BoxLayout([self.swathmode_toolbar, self.swathmode_canvas], 'v')
 
@@ -1686,9 +1712,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.frequency_canvas_height = 14
         self.frequency_canvas_width = 12
         self.frequency_figure = Figure(figsize=(self.frequency_canvas_width, self.frequency_canvas_height))
-        self.frequency_canvas = FigureCanvas(self.frequency_figure)
-        self.frequency_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
-                                            QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        self.frequency_canvas = ResizableFigureCanvas(self.frequency_figure)
+        self.frequency_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                            QtWidgets.QSizePolicy.Policy.Expanding)
         self.frequency_toolbar = NavigationToolbar(self.frequency_canvas, self)
         self.frequency_layout = BoxLayout([self.frequency_toolbar, self.frequency_canvas], 'v')
 
@@ -1696,9 +1722,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.data_canvas_height = 10
         self.data_canvas_width = 10
         self.data_figure = Figure(figsize=(self.data_canvas_width, self.data_canvas_height))
-        self.data_canvas = FigureCanvas(self.data_figure)
-        self.data_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
-                                       QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        self.data_canvas = ResizableFigureCanvas(self.data_figure)
+        self.data_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                       QtWidgets.QSizePolicy.Policy.Expanding)
         self.data_toolbar = NavigationToolbar(self.data_canvas, self)
         self.x_max_data = 0.0
         self.y_max_data = 0.0
@@ -1708,9 +1734,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.time_canvas_height = 10
         self.time_canvas_width = 10
         self.time_figure = Figure(figsize=(self.time_canvas_width, self.time_canvas_height))
-        self.time_canvas = FigureCanvas(self.time_figure)
-        self.time_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
-                                       QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        self.time_canvas = ResizableFigureCanvas(self.time_figure)
+        self.time_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                       QtWidgets.QSizePolicy.Policy.Expanding)
         self.time_toolbar = NavigationToolbar(self.time_canvas, self)
         self.x_max_time = 0.0
         self.y_max_time = 0.0
@@ -1738,53 +1764,63 @@ class MainWindow(QtWidgets.QMainWindow):
         # set up tabs
         self.plot_tabs = QtWidgets.QTabWidget()
         self.plot_tabs.setStyleSheet("background-color: none")
-        self.plot_tabs.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Maximum)
+        self.plot_tabs.setMinimumWidth(0)
+        self.plot_tabs.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                                    QtWidgets.QSizePolicy.Policy.MinimumExpanding)
 
         # set up tab 1: swath coverage
         self.plot_tab1 = QtWidgets.QWidget()
-        self.plot_tab1.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Maximum)
+        self.plot_tab1.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                                    QtWidgets.QSizePolicy.Policy.MinimumExpanding)
         self.plot_tab1_layout = self.swath_layout
         self.plot_tab1.setLayout(self.plot_tab1_layout)
 
         # set up tab 2: backscatter
         self.plot_tab2 = QtWidgets.QWidget()
-        self.plot_tab2.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Maximum)
+        self.plot_tab2.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                                    QtWidgets.QSizePolicy.Policy.MinimumExpanding)
         self.plot_tab2_layout = self.backscatter_layout
         self.plot_tab2.setLayout(self.plot_tab2_layout)
 
         # set up tab 3: ping mode
         self.plot_tab3 = QtWidgets.QWidget()
-        self.plot_tab3.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Maximum)
+        self.plot_tab3.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                                    QtWidgets.QSizePolicy.Policy.MinimumExpanding)
         self.plot_tab3_layout = self.pingmode_layout
         self.plot_tab3.setLayout(self.plot_tab3_layout)
 
         # set up tab 4: pulse form
         self.plot_tab4 = QtWidgets.QWidget()
-        self.plot_tab4.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Maximum)
+        self.plot_tab4.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                                    QtWidgets.QSizePolicy.Policy.MinimumExpanding)
         self.plot_tab4_layout = self.pulseform_layout
         self.plot_tab4.setLayout(self.plot_tab4_layout)
 
         # set up tab 5: swath mode
         self.plot_tab5 = QtWidgets.QWidget()
-        self.plot_tab5.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Maximum)
+        self.plot_tab5.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                                    QtWidgets.QSizePolicy.Policy.MinimumExpanding)
         self.plot_tab5_layout = self.swathmode_layout
         self.plot_tab5.setLayout(self.plot_tab5_layout)
 
         # set up tab 6: frequency
         self.plot_tab6 = QtWidgets.QWidget()
-        self.plot_tab6.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Maximum)
+        self.plot_tab6.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                                    QtWidgets.QSizePolicy.Policy.MinimumExpanding)
         self.plot_tab6_layout = self.frequency_layout
         self.plot_tab6.setLayout(self.plot_tab6_layout)
 
         # set up tab 7: data rate
         self.plot_tab7 = QtWidgets.QWidget()
-        self.plot_tab7.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Maximum)
+        self.plot_tab7.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                                    QtWidgets.QSizePolicy.Policy.MinimumExpanding)
         self.plot_tab7_layout = self.data_layout
         self.plot_tab7.setLayout(self.plot_tab7_layout)
 
         # set up tab 8: timing
         self.plot_tab8 = QtWidgets.QWidget()
-        self.plot_tab8.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Maximum)
+        self.plot_tab8.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                                    QtWidgets.QSizePolicy.Policy.MinimumExpanding)
         self.plot_tab8_layout = self.time_layout
         self.plot_tab8.setLayout(self.plot_tab8_layout)
 
@@ -1812,6 +1848,15 @@ class MainWindow(QtWidgets.QMainWindow):
         update_parameters_tab_visibility(self)
 
         self.center_layout = BoxLayout([self.plot_tabs], 'v')
+        # Matplotlib canvases default to large minimum sizes from figure inches * dpi.
+        for canvas in (self.swath_canvas, self.backscatter_canvas, self.pingmode_canvas,
+                       self.pulseform_canvas, self.swathmode_canvas, self.frequency_canvas,
+                       self.data_canvas, self.time_canvas):
+            canvas.setMinimumSize(0, 0)
+        for toolbar in (self.swath_toolbar, self.backscatter_toolbar, self.pingmode_toolbar,
+                        self.pulseform_toolbar, self.swathmode_toolbar, self.frequency_toolbar,
+                        self.data_toolbar, self.time_toolbar):
+            toolbar.setMinimumWidth(0)
         # self.center_layout.addStretch()
 
     
@@ -2483,7 +2528,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabs.addTab(self.tab2, 'Filter')
         self.trend_tab_index = self.tabs.addTab(self.trend_tab, 'Trend')
 
-        self.tabw = 240  # set fixed tab width
+        self.tabw = self.TAB_PANEL_WIDTH
         self.tabs.setFixedWidth(self.tabw)
 
         # Container for the tabs
@@ -2494,11 +2539,56 @@ class MainWindow(QtWidgets.QMainWindow):
         self.right_layout.addStretch()
 
 
+    @staticmethod
+    def _make_panel_scroll_area(layout, min_width=0, min_height=0, vertical_only=False):
+        """Wrap a layout in a scroll area that scrolls when the viewport is too small."""
+        panel = QtWidgets.QWidget()
+        panel.setLayout(layout)
+        if min_width > 0:
+            panel.setMinimumWidth(min_width)
+        if min_height > 0:
+            panel.setMinimumHeight(min_height)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidget(panel)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        if vertical_only:
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            if min_width > 0:
+                scroll.setFixedWidth(min_width)
+            if min_height > 0:
+                panel.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed,
+                                    QtWidgets.QSizePolicy.Policy.Minimum)
+            scroll.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed,
+                                 QtWidgets.QSizePolicy.Policy.Expanding)
+        else:
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            if min_width > 0 or min_height > 0:
+                panel.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
+                                    QtWidgets.QSizePolicy.Policy.Minimum)
+            scroll.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                 QtWidgets.QSizePolicy.Policy.Expanding)
+        return scroll
+
     def set_main_layout(self):
         # set the main layout with file controls on left and swath figure on right
-        # self.mainWidget.setLayout(BoxLayout([self.left_layout, self.swath_layout, self.right_layout], 'h'))
-        
-        self.mainWidget.setLayout(BoxLayout([self.left_layout, self.center_layout, self.right_layout], 'h'))
+        left_min_w, left_min_h = self.PANEL_MIN_LEFT
+        center_min_h = self.PANEL_MIN_CENTER[1]
+        right_min_w, right_min_h = self.PANEL_MIN_RIGHT
+        left_scroll = self._make_panel_scroll_area(
+            self.left_layout, left_min_w, left_min_h, vertical_only=True)
+        center_scroll = self._make_panel_scroll_area(
+            self.center_layout, 0, center_min_h, vertical_only=False)
+        right_scroll = self._make_panel_scroll_area(
+            self.right_layout, right_min_w, right_min_h, vertical_only=True)
+        main_layout = BoxLayout([left_scroll, center_scroll, right_scroll], 'h')
+        main_layout.setStretch(0, 0)
+        main_layout.setStretch(1, 1)
+        main_layout.setStretch(2, 0)
+        self.mainWidget.setLayout(main_layout)
+        self.resize(*self.WINDOW_DEFAULT)
 
 
     def _handle_calc_trend_clicked(self):
