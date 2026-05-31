@@ -156,13 +156,13 @@ Long-running operations (**Calculate Coverage**, **Scan Parameters Only**, **Con
 | Frequency | Operating frequency over time | Always |
 | Data Rate | Data acquisition rate over time | Always |
 | Timing | Ping interval / timing analysis | Only when **Extract Timing** is enabled during raw-file coverage calculation |
-| Parameters | Runtime parameter search log header + table of parameter changes | Only when raw KMALL/ALL files are loaded in **Raw Swath Sources** |
+| Parameters | Search controls + runtime parameter change table | Only when raw KMALL/ALL files are loaded in **Raw Swath Sources** |
 
-The **Parameters** tab shows acquisition parameter changes in a table (not a comma-separated text log). Rows are in chronological order. Cells that changed from the previous row are highlighted in amber; the first row is never highlighted. Use **Save Search Log** on the Search tab to export the table as CSV (or plain text with a CSV body).
+The **Parameters** tab combines search controls and the acquisition parameter table. Use **Search Parameters** to filter by depth mode, swath mode, pulse form, angles, coverage, frequency, and installation parameters, then click **Update Search**. Rows are in chronological order; cells that changed from the previous row are highlighted; the first row is never highlighted. **Save Search Log** exports the table as CSV (or plain text with a CSV body). Export Analysis also writes `acquisition_log.csv` from this table.
 
 When only Swath PKL or Archive PKL data are loaded, the **Data Rate** and **Timing** plots display an on-plot notice that those metrics are not calculated from PKL/archive sources.
 
-### Right Panel — Controls (4 tabs, 240 px wide)
+### Right Panel — Controls (3 tabs, 240 px wide)
 
 #### Plot Tab
 - Custom system information (model, ship name, cruise) — required description for **Export Analysis**
@@ -225,11 +225,6 @@ Custom plot **depth** and **swath width** boxes are filled from the data extent 
 - **Clear All Points** button: clears the entire trend table and underlying data
 - *Export* groupbox (visible only when Show Coverage Trend is on):
   - **Export Gap Filler** button: exports the current trend as a Gap Filler import file
-
-#### Search Tab
-- Search acquisition parameters (ANY/ALL condition) with checkable rows for depth mode, swath mode, pulse form, swath angle, swath coverage, frequency
-- Installation parameter search (waterline, array offsets, position offsets)
-- **Update Search** and **Save Search Log** buttons (Save exports the Parameters table as CSV by default)
 
 ---
 

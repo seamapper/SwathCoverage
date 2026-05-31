@@ -64,6 +64,7 @@ from copy import deepcopy
 import os
 import datetime
 import json
+import csv
 
 from matplotlib.colors import ListedColormap
 
@@ -269,6 +270,7 @@ def setup(self):
 
     self.param_state = dict((k,[]) for k in self.param_list)
     self.param_changes = dict((k,[]) for k in self.param_list)
+    self.param_changes['fname'] = []
     self.param_scanned = False
     self.fnames_scanned_params = []
     self.fnames_plotted_cov = []
@@ -2118,8 +2120,7 @@ def calc_coverage(self, params_only=False):
                 self.plot_tabs.setCurrentIndex(0)  # show coverage plot tab
 
             else:
-                self.tabs.setCurrentIndex(2)  # show param search tab
-                self.plot_tabs.setCurrentIndex(3)  # show parameter history tab
+                self.plot_tabs.setCurrentIndex(self.parameters_tab_index)
 
             cleanup_kmall_indexes_if_disabled(self, kmall_paths_attempted)
 
@@ -3252,6 +3253,9 @@ def save_all_plots(self):
     analysis_filepath = os.path.join(save_dir, analysis_filename)
     if os.path.exists(analysis_filepath):
         existing_files.append(analysis_filename)
+    acquisition_log_filepath = os.path.join(save_dir, 'acquisition_log.csv')
+    if os.path.exists(acquisition_log_filepath):
+        existing_files.append('acquisition_log.csv')
     
     # Ask user for permission to overwrite if files exist
     if existing_files:
@@ -3268,6 +3272,7 @@ def save_all_plots(self):
     # Save filter settings and source files info
     save_settings_info(self, save_dir, save_name.strip())
     save_analysis_group_json(self, save_dir, save_name.strip())
+    save_acquisition_log_csv(self, save_dir)
     
     # Update layouts for all other plots once before saving to ensure proper canvas filling
     update_other_plot_layouts(self)
@@ -5698,6 +5703,7 @@ def trend_table_cell_changed(self, row, column):
 
 PARAM_TABLE_COLUMNS = [
     ('datetime', 'Date/Time'),
+    ('fname', 'File Name'),
     ('ping_mode', 'Depth Mode'),
     ('pulse_form', 'Pulse Form'),
     ('swath_mode', 'Swath Mode'),
@@ -5726,6 +5732,7 @@ PARAM_TABLE_COLUMNS = [
 ]
 
 PARAM_TABLE_CHANGED_BG = QColor(255, 243, 176)
+PARAM_TABLE_CHANGED_FG = QColor(20, 20, 20)
 
 
 def _param_values_equal(key, value_a, value_b):
@@ -5807,29 +5814,51 @@ def refresh_param_table(self, param_rows=None, clear=True):
             text = format_param_table_value(self, key, row_dict.get(key, ''))
             item = QtWidgets.QTableWidgetItem(text)
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            if prev_row_dict is not None and key != 'datetime':
+            if prev_row_dict is not None and key not in ('datetime', 'fname'):
                 if not _param_values_equal(key, row_dict.get(key), prev_row_dict.get(key)):
                     item.setBackground(PARAM_TABLE_CHANGED_BG)
+                    item.setForeground(PARAM_TABLE_CHANGED_FG)
             self.param_table.setItem(row, col, item)
 
     self.param_table.resizeColumnsToContents()
     QtWidgets.QApplication.processEvents()
 
 
+def write_param_table_csv(self, filepath):
+    """Write the Parameters tab table to a CSV file."""
+    with open(filepath, 'w', newline='', encoding='utf-8') as param_log_file:
+        writer = csv.writer(param_log_file)
+        writer.writerow([label for _, label in PARAM_TABLE_COLUMNS])
+        if hasattr(self, 'param_table'):
+            for row in range(self.param_table.rowCount()):
+                writer.writerow([
+                    self.param_table.item(row, col).text() if self.param_table.item(row, col) else ''
+                    for col in range(self.param_table.columnCount())
+                ])
+
+
+def save_acquisition_log_csv(self, save_dir):
+    """Save Parameters tab data as acquisition_log.csv in an export directory."""
+    filepath = os.path.join(save_dir, 'acquisition_log.csv')
+    try:
+        write_param_table_csv(self, filepath)
+        update_log(self, 'Saved acquisition log: acquisition_log.csv')
+        return True
+    except Exception as e:
+        update_log(self, f'Error saving acquisition log CSV: {str(e)}')
+        return False
+
+
 def update_param_log_header(self, entry, font_color='black', clear_table=False):
-    """Append a status/header message above the parameter table."""
-    if not hasattr(self, 'param_log_header'):
-        return
+    """Clear the parameter table when starting a new search (legacy no-op for header text)."""
     if clear_table and hasattr(self, 'param_table'):
         self.param_table.setRowCount(0)
-    self.param_log_header.setTextColor(QColor(font_color))
-    self.param_log_header.append(entry)
-    QtWidgets.QApplication.processEvents()
+        QtWidgets.QApplication.processEvents()
 
 
 def update_param_log(self, entry, font_color='black'):
-    """Backward-compatible alias for parameter log header messages."""
-    update_param_log_header(self, entry, font_color=font_color)
+    """Backward-compatible alias; header text is no longer shown in the UI."""
+    update_param_log_header(self, entry, font_color=font_color, clear_table=False)
 
 
 def build_param_table_rows(self, include_initial=False):
@@ -6085,6 +6114,11 @@ def get_param_changes(self, search_dict={}, update_log=False, header='', include
     for p in self.param_list:  # update the param change dict
         self.param_changes[p] = [self.det[p][i] for i in idx_change_set]
 
+    if isinstance(self.det.get('fname'), list):
+        self.param_changes['fname'] = [self.det['fname'][i] for i in idx_change_set]
+    else:
+        self.param_changes['fname'] = [''] * len(idx_change_set)
+
     print('got idx_change = ', idx_change)
     print('got idx_change_set = ', idx_change_set)
     print('updated self.param_changes =', self.param_changes)
@@ -6094,13 +6128,9 @@ def get_param_changes(self, search_dict={}, update_log=False, header='', include
 
     if update_log:
         refresh_param_table(self, build_param_table_rows(self, include_initial=include_initial), clear=True)
-        if len(self.param_changes.get('datetime', [])) > 0 or include_initial:
-            update_param_log_header(self, 'End of search results...')
-        elif include_initial:
-            update_param_log_header(self, 'End of search results...')
-        else:
-            update_param_log_header(self, 'No results...')
-    print('end of routine calling update_param_log')
+        if len(self.param_changes.get('datetime', [])) == 0 and not include_initial:
+            update_log(self, 'Parameter search completed with no results.')
+    print('end of routine calling get_param_changes')
 
 
 def update_param_search(self, update_log=True):  # update runtime param search criteria selected by the user
@@ -6163,15 +6193,11 @@ def save_param_log(self):
     fname_out = param_log_name[0]
 
     try:
-        import csv
         if fname_out.lower().endswith('.txt'):
             with open(fname_out, 'w', encoding='utf-8') as param_log_file:
-                if hasattr(self, 'param_log_header'):
-                    param_log_file.write(self.param_log_header.toPlainText())
-                    param_log_file.write('\n\n')
+                headers = [label for _, label in PARAM_TABLE_COLUMNS]
+                param_log_file.write(','.join(headers) + '\n')
                 if hasattr(self, 'param_table'):
-                    headers = [label for _, label in PARAM_TABLE_COLUMNS]
-                    param_log_file.write(','.join(headers) + '\n')
                     for row in range(self.param_table.rowCount()):
                         row_values = []
                         for col in range(self.param_table.columnCount()):
@@ -6184,15 +6210,7 @@ def save_param_log(self):
         else:
             if not fname_out.lower().endswith('.csv'):
                 fname_out += '.csv'
-            with open(fname_out, 'w', newline='', encoding='utf-8') as param_log_file:
-                writer = csv.writer(param_log_file)
-                writer.writerow([label for _, label in PARAM_TABLE_COLUMNS])
-                if hasattr(self, 'param_table'):
-                    for row in range(self.param_table.rowCount()):
-                        writer.writerow([
-                            self.param_table.item(row, col).text() if self.param_table.item(row, col) else ''
-                            for col in range(self.param_table.columnCount())
-                        ])
+            write_param_table_csv(self, fname_out)
     except Exception as e:
         update_log(self, f'Failed to save parameter log: {str(e)}')
         return
@@ -6207,7 +6225,6 @@ def save_param_log(self):
             save_session_config(config)
 
     update_log(self, 'Saved parameter log to ' + os.path.basename(fname_out))
-    update_param_log_header(self, '\n*** SAVED PARAMETER LOG *** --> ' + fname_out)
 
 def plot_backscatter(self, det, is_archive=False, print_updates=False, det_name='detection dictionary'):
     # plot the parsed detections from new or archive data dict with backscatter coloring; return the number of points plotted after filtering

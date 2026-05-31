@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.13" 
+__version__ = "2026.14" 
 
 # BSD-3-Clause License
 #
@@ -937,7 +937,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_params_btn = PushButton('Scan Parameters Only', btnw, btnh, 'scan_params_btn',
                                             'Scan acquisition parameters ONLY for loaded files\n\n'
                                             'This can be orders of magnitude faster than parsing full coverage data\n\n'
-                                            'See the Parameters and Search tabs for history and search options\n\n'
+                                            'See the Parameters tab for search options and parameter history\n\n'
                                             'WARNING: NO COVERAGE or TIMING data will be parsed or plotted!\n\n'
                                             'NOTE: Zeros will be used for coverage placeholders\n\n'
                                             'Runtime and installation parameter data will be assigned to the first '
@@ -949,7 +949,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Export and save buttons
         self.save_all_plots_btn = PushButton('Export Analysis', btnw, btnh, 'save_all_plots_btn',
-                                             'Export all plots, settings text, and analysis JSON package')
+                                             'Export all plots, settings text, analysis JSON package, and acquisition_log.csv')
         self.import_analysis_group_btn = PushButton('Import Analysis Group', btnw, btnh, 'import_analysis_group_btn',
                                                     'Import analysis files and settings from an exported JSON package')
         # Allow these two buttons to expand equally across the available row width.
@@ -1456,6 +1456,135 @@ class MainWindow(QtWidgets.QMainWindow):
             if hasattr(self, 'refresh_plot'):
                 refresh_plot(self, call_source='remove_selected_spec_curves')
 
+    def _setup_param_search_controls(self):
+        """Create parameter search controls shown on the Parameters plot tab."""
+        row_align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+        def param_row(chk, *value_widgets):
+            row = BoxLayout([chk, *value_widgets], 'h', False, row_align)
+            row.setSpacing(4)
+            row.setContentsMargins(0, 0, 0, 0)
+            return row
+
+        param_cond_lbl = Label('Show when', 55, 20, 'param_cond_lbl', row_align)
+        param_cond_lbl.adjustSize()
+        param_cond_lbl.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.param_cond_cbox = ComboBox(['ANY parameter matches', 'ALL parameters match'], 160, 20, 'param_cond_cbox',
+                                        'Search for parameter changes that match ANY or ALL of the selections.\n\n'
+                                        '"ANY parameter matches" will return every time a parameter change satisfies'
+                                        'any of the checked search options.\n\n'
+                                        '"ALL parameters match" will return only times where every checked search '
+                                        'option is satisfied')
+        param_cond_layout = BoxLayout([param_cond_lbl, self.param_cond_cbox], 'h', False, row_align)
+        param_cond_layout.setSpacing(4)
+        param_cond_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.p1_chk = CheckBox('Depth Mode:', False, 'ping_mode', 'Search by Depth Mode', 0, 20)
+        self.p1_cbox = ComboBox(['All', 'Very Shallow', 'Shallow', 'Medium', 'Deep', 'Deeper', 'Very Deep',
+                                 'Extra Deep', 'Extreme Deep'], 110, 20, 'param1_cbox',
+                                'Depth Modes (not all modes apply for all models)')
+
+        self.p2_chk = CheckBox('Swath Mode:', False, 'swath_mode', 'Search by Swath Mode', 0, 20)
+        self.p2_cbox = ComboBox(['All', 'Single Swath', 'Dual Swath'], 110, 20, 'param2_cbox',
+                                'Swath Modes (Dual Swath includes "Dynamic" and "Fixed" spacing)')
+
+        self.p3_chk = CheckBox('Pulse Form:', False, 'pulse_form', 'Search by Pulse Form', 0, 20)
+        self.p3_cbox = ComboBox(['All', 'CW', 'FM', 'Mixed'], 110, 20, 'param3_cbox', 'Pulse Form')
+
+        self.p4_chk = CheckBox('Swath Angle:', False, 'swath_angle', 'Search by Swath Angle Limits', 0, 20)
+        self.p4_cbox = ComboBox(['All', '<=', '>=', '=='], 40, 20, 'param4_cbox',
+                                'Select swath angle limit search criterion')
+        self.p4_tb = LineEdit('75', 50, 20, 'swath_angle_tb', 'Search by swath angle limit (0-75 deg, port/stbd)')
+        self.p4_tb.setValidator(QDoubleValidator(0, 75.0, 1))
+
+        self.p5_chk = CheckBox('Swath Coverage:', False, 'swath_cov', 'Search by Swath Coverage Limits', 0, 20)
+        self.p5_cbox = ComboBox(['All', '<=', '>=', '=='], 40, 20, 'param5_cbox',
+                                'Select swath coverage limit search criterion')
+        self.p5_tb = LineEdit('20000', 60, 20, 'swath_cov_tb', 'Search by swath coverage limit (0-30000 m, port/stbd)')
+        self.p5_tb.setValidator(QDoubleValidator(0, 30000.0, 1))
+
+        self.p6_chk = CheckBox('Frequency:', False, 'frequency', 'Search by Frequency', 0, 20)
+        self.p6_cbox = ComboBox(['All', '12 kHz', '30 kHz', '40-100 kHz', '70-100 kHz', '200 kHz', '300 kHz', '400 kHz'],
+                                110, 20, 'param6_cbox', 'Frequency')
+
+        self.p7_chk = CheckBox('Waterline', True, 'wl_z_m', 'Search by Waterline', 0, 20)
+        self.p7_cbox = ComboBox(['All'], 90, 20, 'param7_cbox', 'Waterline (m, positive down from origin)')
+
+        self.p8_chk = CheckBox('Array Offsets', True, 'array_xyz_m', 'Search by TX/RX Array Offsets (m)', 0, 20)
+        self.p8_cbox = ComboBox(['All'], 90, 20, 'param8_cbox', 'TX/RX Array Offsets (m)')
+
+        self.p9_chk = CheckBox('Pos. Offsets', True, 'pos_xyz_m', 'Search by Active Pos. Sys. offsets (m)', 0, 20)
+        self.p9_cbox = ComboBox(['All'], 90, 20, 'param9_cbox', 'Active Position System Offsets (m)')
+
+        self.param_search_btn = PushButton('Update Search', 100, 20, 'param_search_btn',
+                                           'Search acquisition parameters for settings specified above.\n\n'
+                                           'Results reflect the first ping time(s) when settings match the selected '
+                                           'search options (i.e., the first ping and after any changes that match).\n\n'
+                                           'ALL changes will be shown by default if no settings are specified.\n\n'
+                                           'If individual settings are selected, the results can be further filtered by'
+                                           'matching ANY or ALL selections:\n\n'
+                                           '  a) ANY selected parameter matches (e.g., any time Depth Mode is changed '
+                                           '  to Deep *and* any time Swath Mode is changed to Dual Swath), or\n\n'
+                                           '  b) ALL selected parameters match (e.g., only times when a change has'
+                                           '  been made so the Depth Mode is Deep *and* Swath Mode is Dual Swath\n\n'
+                                           'Results are shown in the Runtime Parameter Log table below.')
+
+        self.save_param_log_btn = PushButton('Save Search Log', 100, 20, 'param_log_save_btn',
+                                             'Save the current parameter table to a CSV or text file')
+
+        top_row = QtWidgets.QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.addLayout(param_cond_layout)
+        top_row.addStretch(1)
+        top_row.addWidget(self.param_search_btn)
+        top_row.addWidget(self.save_param_log_btn)
+
+        runtime_row1 = QtWidgets.QHBoxLayout()
+        runtime_row1.setContentsMargins(0, 0, 0, 0)
+        runtime_row1.addLayout(param_row(self.p1_chk, self.p1_cbox))
+        runtime_row1.addSpacing(16)
+        runtime_row1.addLayout(param_row(self.p3_chk, self.p3_cbox))
+        runtime_row1.addSpacing(16)
+        runtime_row1.addLayout(param_row(self.p2_chk, self.p2_cbox))
+        runtime_row1.addStretch(1)
+
+        runtime_row2 = QtWidgets.QHBoxLayout()
+        runtime_row2.setContentsMargins(0, 0, 0, 0)
+        runtime_row2.addLayout(param_row(self.p4_chk, self.p4_cbox, self.p4_tb))
+        runtime_row2.addSpacing(16)
+        runtime_row2.addLayout(param_row(self.p5_chk, self.p5_cbox, self.p5_tb))
+        runtime_row2.addSpacing(16)
+        runtime_row2.addLayout(param_row(self.p6_chk, self.p6_cbox))
+        runtime_row2.addStretch(1)
+
+        runtime_layout = QtWidgets.QVBoxLayout()
+        runtime_layout.setContentsMargins(0, 0, 0, 0)
+        runtime_layout.setSpacing(4)
+        runtime_layout.addLayout(runtime_row1)
+        runtime_layout.addLayout(runtime_row2)
+
+        install_layout = QtWidgets.QHBoxLayout()
+        install_layout.setContentsMargins(0, 0, 0, 0)
+        install_layout.addLayout(param_row(self.p7_chk, self.p7_cbox))
+        install_layout.addSpacing(16)
+        install_layout.addLayout(param_row(self.p8_chk, self.p8_cbox))
+        install_layout.addSpacing(16)
+        install_layout.addLayout(param_row(self.p9_chk, self.p9_cbox))
+        install_layout.addStretch(1)
+        install_search_gb = GroupBox('Installation Parameters', install_layout, False, False, 'install_search_gb')
+
+        param_search_layout = QtWidgets.QVBoxLayout()
+        param_search_layout.setContentsMargins(4, 4, 4, 4)
+        param_search_layout.setSpacing(6)
+        param_search_layout.addLayout(top_row)
+        param_search_layout.addLayout(runtime_layout)
+        param_search_layout.addWidget(install_search_gb)
+
+        self.param_search_gb = GroupBox('Search Parameters', param_search_layout,
+                                        True, False, 'param_search_gb')
+        self.param_search_gb.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                           QtWidgets.QSizePolicy.Policy.Fixed)
+
     def set_center_layout(self):
         """
         Set up the center panel layout containing all the plotting canvases and toolbars.
@@ -1556,12 +1685,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.y_max_time = 0.0
         self.time_layout = BoxLayout([self.time_toolbar, self.time_canvas], 'v')
 
-        # Parameter log/table widgets for the Parameters tab
-        self.param_log_header = TextEdit("background-color: lightgray", True, 'param_log_header')
-        self.param_log_header.setMaximumHeight(120)
-        self.param_log_header.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
-                                            QtWidgets.QSizePolicy.Policy.Fixed)
-        update_param_log_header(self, '*** New acquisition parameter log ***')
+        # Parameter search controls and table for the Parameters tab
+        self._setup_param_search_controls()
 
         self.param_table = QtWidgets.QTableWidget()
         self.param_table.setObjectName('param_table')
@@ -1569,12 +1694,15 @@ class MainWindow(QtWidgets.QMainWindow):
                                        QtWidgets.QSizePolicy.Policy.MinimumExpanding)
         configure_param_table(self)
 
-        param_view_layout = QtWidgets.QVBoxLayout()
-        param_view_layout.setContentsMargins(0, 0, 0, 0)
-        param_view_layout.addWidget(self.param_log_header)
-        param_view_layout.addWidget(self.param_table, 1)
-        param_log_gb = GroupBox('Runtime Parameter Log', param_view_layout, False, False, 'param_log_gb')
-        self.param_layout = BoxLayout([param_log_gb], 'v')
+        param_table_layout = QtWidgets.QVBoxLayout()
+        param_table_layout.setContentsMargins(0, 0, 0, 0)
+        param_table_layout.addWidget(self.param_table, 1)
+        param_log_gb = GroupBox('Runtime Parameter Log', param_table_layout, False, False, 'param_log_gb')
+
+        self.param_layout = QtWidgets.QVBoxLayout()
+        self.param_layout.setContentsMargins(0, 0, 0, 0)
+        self.param_layout.addWidget(self.param_search_gb)
+        self.param_layout.addWidget(param_log_gb, 1)
 
         # set up tabs
         self.plot_tabs = QtWidgets.QTabWidget()
@@ -1631,7 +1759,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # set up tab 9: runtime parameters
         self.plot_tab9 = QtWidgets.QWidget()
-        self.plot_tab9.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Maximum)
+        self.plot_tab9.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                     QtWidgets.QSizePolicy.Policy.Expanding)
         self.plot_tab9_layout = self.param_layout
         self.plot_tab9.setLayout(self.plot_tab9_layout)
 
@@ -2131,92 +2260,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # Add Plot Data groupbox to left layout above Activity Log
         self.left_layout.insertWidget(1, plot_btn_gb, 0)   # stretch factor 0 for minimal space
 
-        # add runtime parameter search options
-        param_cond_lbl = Label('Show when', 60, 20, 'param_cond_lbl', (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter))
-        self.param_cond_cbox = ComboBox(['ANY parameter matches', 'ALL parameters match'], 140, 20, 'param_cond_cbox',
-                                        'Search for parameter changes that match ANY or ALL of the selections.\n\n'
-                                        '"ANY parameter matches" will return every time a parameter change satisfies'
-                                        'any of the checked search options.\n\n'
-                                        '"ALL parameters match" will return only times where every checked search '
-                                        'option is satisfied')
-
-        param_cond_layout = BoxLayout([param_cond_lbl, self.param_cond_cbox], 'h', False, (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter))
-
-        self.p1_chk = CheckBox('Depth Mode:', False, 'ping_mode', 'Search by Depth Mode', 100, 20)
-        self.p1_cbox = ComboBox(['All', 'Very Shallow', 'Shallow', 'Medium', 'Deep', 'Deeper', 'Very Deep',
-                                     'Extra Deep', 'Extreme Deep'], 100, 20, 'param1_cbox',
-                                    'Depth Modes (not all modes apply for all models)')
-
-        self.p2_chk = CheckBox('Swath Mode:', False, 'swath_mode', 'Search by Swath Mode', 100, 20)
-        self.p2_cbox = ComboBox(['All', 'Single Swath', 'Dual Swath'], 100, 20, 'param2_cbox',
-                                    'Swath Modes (Dual Swath includes "Dynamic" and "Fixed" spacing)')
-
-        self.p3_chk = CheckBox('Pulse Form:', False, 'pulse_form', 'Search by Pulse Form', 100, 20)
-        self.p3_cbox = ComboBox(['All', 'CW', 'FM', 'Mixed'], 100, 20, 'param3_cbox', 'Pulse Form')
-
-        self.p4_chk = CheckBox('Swath Angle (deg):', False, 'swath_angle', 'Search by Swath Angle Limits', 140, 20)
-        self.p4_cbox = ComboBox(['All', '<=', '>=', '=='], 40, 20, 'param4_cbox',
-                                    'Select swath angle limit search criterion')
-        self.p4_tb = LineEdit('75', 38, 20, 'swath_angle_tb', 'Search by swath angle limit (0-75 deg, port/stbd)')
-        self.p4_tb.setValidator(QDoubleValidator(0, 75.0, 1))  # assume 0-75 deg range for either side
-        param4_tb_layout = BoxLayout([self.p4_cbox, self.p4_tb], 'h', False, (Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-
-        self.p5_chk = CheckBox('Swath Cover. (m):', False, 'swath_cov', 'Search by Swath Coverage Limits', 140, 20)
-        self.p5_cbox = ComboBox(['All', '<=', '>=', '=='], 40, 20, 'param5_cbox',
-                                    'Select swath coverage limit search criterion')
-        self.p5_tb = LineEdit('20000', 38, 20, 'swath_cov_tb', 'Search by swath coverage limit (0-30000 m, port/stbd)')
-        self.p5_tb.setValidator(QDoubleValidator(0, 30000.0, 1))  # assume 30 km max (EM124)
-        param5_tb_layout = BoxLayout([self.p5_cbox, self.p5_tb], 'h', False, (Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-
-        self.p6_chk = CheckBox('Frequency:', False, 'frequency', 'Search by Frequency', 100, 20)
-        self.p6_cbox = ComboBox(['All', '12 kHz', '30 kHz', '40-100 kHz', '70-100 kHz', '200 kHz', '300 kHz', '400 kHz'],
-                                100, 20, 'param6_cbox', 'Frequency')
-
-        self.p7_chk = CheckBox('Waterline', True, 'wl_z_m', 'Search by Waterline', 100, 20)
-        self.p7_cbox = ComboBox(['All'], 100, 20, 'param7_cbox', 'Waterline (m, positive down from origin)')
-
-        # update Array Offsets to include LINEAR and ANGULAR offsets
-        self.p8_chk = CheckBox('Array Offsets', True, 'array_xyz_m', 'Search by TX/RX Array Offsets (m)', 100, 20)
-        self.p8_cbox = ComboBox(['All'], 100, 20, 'param8_cbox', 'TX/RX Array Offsets (m)')
-
-        # update Active Position System offsets to include Attitude LINEAR and ANGULAR offsets (perhaps as Att. Offsets)
-        self.p9_chk = CheckBox('Pos. Offsets', True, 'pos_xyz_m', 'Search by Active Pos. Sys. offsets (m)', 100, 20)
-        self.p9_cbox = ComboBox(['All'], 100, 20, 'param9_cbox', 'Active Position System Offsets (m)')
-
-        install_chk_layout1 = BoxLayout([self.p7_chk, self.p8_chk], 'h', False)
-        install_chk_layout2 = BoxLayout([self.p9_chk], 'h', False)
-        install_chk_layout = BoxLayout([install_chk_layout1, install_chk_layout2], 'v', False)
-        install_search_gb = GroupBox('Installation Parameters', install_chk_layout, False, False, 'install_search_gb')
-
-        # making separate vertical layouts of checkbox widgets and combobox widgets to set alignments separately
-        self.param_chk_layout = BoxLayout([self.p1_chk, self.p2_chk, self.p3_chk, self.p4_chk, self.p5_chk, self.p6_chk], 'v', False)
-        param_value_layout = BoxLayout([self.p1_cbox, self.p2_cbox, self.p3_cbox, param4_tb_layout, param5_tb_layout, self.p6_cbox],
-                                       'v', False, (Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-        param_search_hlayout = BoxLayout([self.param_chk_layout, param_value_layout], 'h')
-
-        param_search_vlayout = BoxLayout([param_cond_layout, param_search_hlayout, install_search_gb], 'v', False)
-
-        self.param_search_gb = GroupBox('Search Acquisition Parameters', param_search_vlayout,
-                                        True, False, 'param_search_gb')
-
-
-        # add search / update button
-        self.param_search_btn = PushButton('Update Search', 100, 20, 'param_search_btn',
-                                           'Search acquisition parameters for settings specified above.\n\n'
-                                           'Results reflect the first ping time(s) when settings match the selected '
-                                           'search options (i.e., the first ping and after any changes that match).\n\n'
-                                           'ALL changes will be shown by default if no settings are specified.\n\n'
-                                           'If individual settings are selected, the results can be further filtered by'
-                                           'matching ANY or ALL selections:\n\n'
-                                           '  a) ANY selected parameter matches (e.g., any time Depth Mode is changed '
-                                           '  to Deep *and* any time Swath Mode is changed to Dual Swath), or\n\n'
-                                           '  b) ALL selected parameters match (e.g., only times when a change has'
-                                           '  been made so the Depth Mode is Deep *and* Swath Mode is Dual Swath\n\n'
-                                           'Results will be printed to the acquisition parameter log. ')
-
-        self.save_param_log_btn = PushButton('Save Search Log', 100, 20, 'param_log_save_btn',
-                                             'Save the current Acquisition Parameter Log to a text file')
-
         # set up tabs
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.setStyleSheet("background-color: none")
@@ -2235,13 +2278,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tab2_layout.addStretch()
         self.tab2.setLayout(self.tab2_layout)
 
-        # set up tab 3: parameter search options
-        self.tab3 = QtWidgets.QWidget()
-        self.tab3_layout = BoxLayout([self.param_search_gb, self.param_search_btn, self.save_param_log_btn], 'v')
-        self.tab3_layout.addStretch()
-        self.tab3.setLayout(self.tab3_layout)
-
-        # set up tab 4: coverage trend table (Depth/Width per bin)
+        # set up tab 3: coverage trend table (Depth/Width per bin)
         self.trend_tab = QtWidgets.QWidget()
         # Mirror the Plot tab "Show Coverage Trend" checkbox at the top of the Trend tab.
         # Off by default, and synchronized both directions.
@@ -2391,11 +2428,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # When Min Points changes, refresh plot so trend is recalculated and redrawn
         self.trend_min_points_tb.returnPressed.connect(lambda: refresh_plot(self))
 
-        # add tabs to tab layout (Trend before Search)
+        # add tabs to tab layout
         self.tabs.addTab(self.tab1, 'Plot')
         self.tabs.addTab(self.tab2, 'Filter')
         self.trend_tab_index = self.tabs.addTab(self.trend_tab, 'Trend')
-        self.tabs.addTab(self.tab3, 'Search')
 
         self.tabw = 240  # set fixed tab width
         self.tabs.setFixedWidth(self.tabw)
