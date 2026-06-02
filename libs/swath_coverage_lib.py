@@ -3588,12 +3588,12 @@ def _resolve_analysis_source_path(path, json_dir):
         return path
     path_str = str(path)
     if os.path.isfile(path_str):
-        return os.path.normpath(path_str)
+        return normalize_stored_path(path_str)
     rel_path = path_str.replace('\\', '/')
     if json_dir:
         candidate = os.path.normpath(os.path.join(json_dir, rel_path.replace('/', os.sep)))
         if os.path.isfile(candidate):
-            return candidate
+            return normalize_stored_path(candidate)
     return path_str
 
 

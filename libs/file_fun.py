@@ -8,6 +8,19 @@ from PyQt6.QtGui import QDoubleValidator, QColor
 from PyQt6.QtCore import Qt, QSize
 
 
+def normalize_stored_path(path):
+	"""Normalize a file path for list-widget storage (forward slashes, like QFileDialog paths)."""
+	if not path:
+		return path
+	return os.path.normpath(path).replace('\\', '/')
+
+
+def split_stored_path(path):
+	"""Return (directory, basename) for a stored file path."""
+	stored = normalize_stored_path(path)
+	return os.path.dirname(stored), os.path.basename(stored)
+
+
 def get_current_file_list(self):  # get current list of files in qlistwidget
 	list_items = []
 	for f in range(self.file_list.count()):
@@ -152,8 +165,9 @@ def update_file_list(self, fnames, verbose=True):
 		return
 
 	get_current_file_list(self)
-	fnames_new = [fn for fn in fnames if fn not in self.filenames]
-	fnames_skip = [fs for fs in fnames if fs in self.filenames]
+	existing = {normalize_stored_path(fn) for fn in self.filenames}
+	fnames_new = [fn for fn in fnames if normalize_stored_path(fn) not in existing]
+	fnames_skip = [fs for fs in fnames if normalize_stored_path(fs) in existing]
 
 	if len(fnames_skip) > 0:  # skip any files already added, update log
 		update_log(self, 'Skipping ' + str(len(fnames_skip)) + ' file(s) already added')
@@ -161,10 +175,11 @@ def update_file_list(self, fnames, verbose=True):
 	i = 0
 	for f in range(len(fnames_new)):  # add item with full file path as data field, show/hide path text
 		try:
-			[path, fname] = fnames_new[f].rsplit('/', 1)
+			full_path = normalize_stored_path(fnames_new[f])
+			path, fname = split_stored_path(full_path)
 			if fname.rsplit('.', 1)[0]:  # add file only if name exists prior to ext (may pass splitext check if adding dir)
 				new_item = QtWidgets.QListWidgetItem()
-				new_item.setData(1, fnames_new[f])  # set full file path as data, role 1
+				new_item.setData(1, full_path)  # set full file path as data, role 1
 				# Check if show_path_chk exists, default to False if not
 				show_path = False
 				if hasattr(self, 'show_path_chk'):
@@ -199,8 +214,8 @@ def get_new_file_list(self, fext=[''], flist_old=[]):
 		fnames_ext = [fn for fn in self.filenames if any(ext in fn for ext in fext)]
 		print('fext =', fext, ' got fnames_ext =', fnames_ext)
 
-	fnames_old = [fn.split('/')[-1] for fn in flist_old]  # file names only (no paths) from flist_old
-	fnames_new = [fn for fn in fnames_ext if fn.split('/')[-1] not in fnames_old]  # check if fname in fnames_old
+	fnames_old = [os.path.basename(normalize_stored_path(fn)) for fn in flist_old]
+	fnames_new = [fn for fn in fnames_ext if os.path.basename(normalize_stored_path(fn)) not in fnames_old]
 
 	print('returning from get_new_file_list')
 	print("DEBUG: self.filenames =", self.filenames)
@@ -312,7 +327,7 @@ def show_file_paths(self): #, show_path=False):
 		show_path = self.show_path_chk.isChecked()
 	
 	for i in range(self.file_list.count()):
-		[path, fname] = self.file_list.item(i).data(1).rsplit('/', 1)  # split full file path from item data, role 1
+		path, fname = split_stored_path(self.file_list.item(i).data(1))
 		self.file_list.item(i).setText((path + '/') * int(show_path) + fname)
 		# self.file_list.item(i).setText((path + '/') * int(show_path) + fname)
 

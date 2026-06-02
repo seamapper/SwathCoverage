@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.15" 
+__version__ = "2026.16" 
 
 # BSD-3-Clause License
 #
@@ -2322,6 +2322,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lasso_undo_btn.clicked.connect(self._handle_lasso_undo_clicked)
         self.lasso_clear_btn.setEnabled(False)
         self.lasso_undo_btn.setEnabled(False)
+
+        for lasso_btn in (self.lasso_remove_btn, self.lasso_clear_btn, self.lasso_undo_btn):
+            lasso_btn.setMinimumWidth(0)
+            lasso_btn.setMaximumWidth(16777215)
+            lasso_btn.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                     QtWidgets.QSizePolicy.Policy.Fixed)
 
         lasso_btn_layout = BoxLayout([self.lasso_remove_btn, self.lasso_clear_btn, self.lasso_undo_btn], 'v')
         self.lasso_gb = GroupBox('Lasso Remove', lasso_btn_layout, False, False, 'lasso_gb')
