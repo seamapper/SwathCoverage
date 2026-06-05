@@ -885,6 +885,7 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
             top_data_selection = 'Archive data'
 
     # update clim_all_data with limits of self.det
+    update_data_rate_color_style(self)
     if self.show_data_chk_arc.isChecked() and top_data_selection != 'Archive data':
         # Plot archive first as background unless archive is explicitly selected as top layer.
         # print('in refresh plot, calling show_archive first to allow new data on top')
@@ -1022,6 +1023,7 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
     if self.verbose_logging:
         print('calling self.frequency_canvas.draw()')
     self.frequency_canvas.draw()  # final update for the frequency canvas
+    add_data_rate_ping_interval_legend(self)
     if self.verbose_logging:
         print('calling self.data_canvas.draw()')
     self.data_canvas.draw()  # final update for the data rate canvas
@@ -3080,6 +3082,20 @@ def add_nominal_angle_lines(self):
             update_log(self, 'Failure plotting the swath angle lines')
 
 
+def _safe_remove_cbar_dict_artist(cax):
+    """Remove a stored legend/colorbar without failing if matplotlib already dropped it."""
+    if cax is None:
+        return
+    try:
+        cax.remove()
+    except (KeyError, ValueError, AttributeError):
+        try:
+            if hasattr(cax, 'ax'):
+                cax.ax.remove()
+        except (KeyError, ValueError, AttributeError):
+            pass
+
+
 def add_legend(self):
     # make legend or colorbar corresponding to clim (depth, backscatter) or cset (depth, swath, pulse mode)
     # for simplicity in handling the legend handles/labels for all combos of [plot axis, data loaded, color mode, and
@@ -3091,8 +3107,11 @@ def add_legend(self):
     if self.colorbar_chk.isChecked():
         # Handle each plot type separately based on the axis
         for subplot, params in self.cbar_dict.items():
+            if params['ax'] == self.data_rate_ax2:
+                continue  # ping interval legend handled by add_data_rate_ping_interval_legend
             if params['cax']:
-                params['cax'].remove()
+                _safe_remove_cbar_dict_artist(params['cax'])
+                params['cax'] = None
             
             # Determine legend type based on the axis
             if params['ax'] == self.swath_ax:
@@ -3208,8 +3227,11 @@ def add_legend(self):
     else:  # solid color for all plots when colorbar is disabled
         print('adding solid color legend to all axes')
         for subplot, params in self.cbar_dict.items():
+            if params['ax'] == self.data_rate_ax2:
+                continue  # ping interval legend handled by add_data_rate_ping_interval_legend
             if params['cax']:
-                params['cax'].remove()
+                _safe_remove_cbar_dict_artist(params['cax'])
+                params['cax'] = None
 
             # sort legend handles and add legend
             h_dict = sort_legend_labels(self, params['ax'])
@@ -3359,10 +3381,11 @@ def save_all_plots(self):
         ('Pulse_Form', self.pulseform_figure),
         ('Swath_Mode', self.swathmode_figure),
         ('Frequency', self.frequency_figure),
-        ('Data_Rate', self.data_figure),
     ]
     if getattr(self, 'timing_data_extracted', False):
         plot_types.append(('Timing', self.time_figure))
+    data_rate_export_labels = list(DATA_RATE_COLORMAP_LABELS)
+    selected_data_rate_colormap = get_data_rate_colormap_label(self)
 
     if os.path.isdir(save_dir) and os.listdir(save_dir):
         update_log(self, f'Overwriting existing export files in: {save_dir}')
@@ -3384,6 +3407,8 @@ def save_all_plots(self):
     for plot_type, figure in plot_types:
         original_sizes[plot_type] = figure.get_size_inches()
         figure.set_size_inches(12, 12)
+    original_sizes['Data_Rate'] = self.data_figure.get_size_inches()
+    self.data_figure.set_size_inches(12, 12)
     
     for plot_type, figure in plot_types:
         try:
@@ -3399,7 +3424,6 @@ def save_all_plots(self):
                 'Pulse_Form': self.pulseform_ax,
                 'Swath_Mode': self.swathmode_ax,
                 'Frequency': self.frequency_ax,
-                'Data_Rate': self.data_rate_ax1,
                 'Timing': self.time_ax1
             }
             ax = ax_map.get(plot_type)
@@ -3433,13 +3457,6 @@ def save_all_plots(self):
                 gs = gridspec.GridSpec(1, 1, figure=figure, left=0.07, right=0.97, bottom=0.07, top=0.93)
                 ax.set_position(gs[0].get_position(figure))
                 ax.set_subplotspec(gs[0])
-            elif plot_type == 'Data_Rate':
-                # Keep export layout for Data Rate tab consistent with GUI spacing.
-                gs_data = gridspec.GridSpec(1, 2, figure=figure, left=0.07, right=0.97, bottom=0.07, top=0.93, wspace=0.20)
-                self.data_rate_ax1.set_position(gs_data[0].get_position(figure))
-                self.data_rate_ax1.set_subplotspec(gs_data[0])
-                self.data_rate_ax2.set_position(gs_data[1].get_position(figure))
-                self.data_rate_ax2.set_subplotspec(gs_data[1])
             elif plot_type == 'Timing':
                 # Keep export layout for Timing tab consistent with GUI spacing.
                 gs_timing = gridspec.GridSpec(1, 1, figure=figure, left=0.07, right=0.97, bottom=0.07, top=0.93)
@@ -3461,18 +3478,47 @@ def save_all_plots(self):
             error_details = traceback.format_exc()
             update_log(self, f'Error saving {plot_type} plot: {str(e)}')
             update_log(self, f'Error details: {error_details}')
+
+    for colormap_label in data_rate_export_labels:
+        try:
+            refresh_data_rate_plots(self, dr_colormap=colormap_label)
+            self.data_figure.tight_layout(pad=2.0, rect=[0, 0, 1, 0.97])
+            gs_data = gridspec.GridSpec(1, 2, figure=self.data_figure, left=0.07, right=0.97, bottom=0.07, top=0.93, wspace=0.20)
+            self.data_rate_ax1.set_position(gs_data[0].get_position(self.data_figure))
+            self.data_rate_ax1.set_subplotspec(gs_data[0])
+            self.data_rate_ax2.set_position(gs_data[1].get_position(self.data_figure))
+            self.data_rate_ax2.set_subplotspec(gs_data[1])
+            suffix = DATA_RATE_COLORMAP_EXPORT_SUFFIX[colormap_label]
+            filename = f"{save_name.strip()}_Data_Rate_{suffix}.png"
+            filepath = os.path.join(save_dir, filename)
+            self.data_figure.savefig(filepath,
+                                     dpi=600, facecolor='w', edgecolor='k',
+                                     orientation='portrait', format=None,
+                                     transparent=False, bbox_inches='tight', pad_inches=0.2,
+                                     metadata=None)
+            update_log(self, f'Saved Data Rate plot ({colormap_label}): {filename}')
+            saved_count += 1
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            update_log(self, f'Error saving Data Rate plot ({colormap_label}): {str(e)}')
+            update_log(self, f'Error details: {error_details}')
+
+    refresh_data_rate_plots(self, dr_colormap=selected_data_rate_colormap)
     
     # Always restore original figure sizes after saving, then refresh once for the GUI
     update_log(self, 'Resetting original image sizes... please wait...')
     for plot_type, figure in plot_types:
         if plot_type in original_sizes:
             figure.set_size_inches(original_sizes[plot_type][0], original_sizes[plot_type][1], forward=True)
+    if 'Data_Rate' in original_sizes:
+        self.data_figure.set_size_inches(original_sizes['Data_Rate'][0], original_sizes['Data_Rate'][1], forward=True)
 
     refresh_plot(self, print_time=False, call_source='save_all_plots')
 
     remember_export_analysis_prefs(self, parent_dir=parent_dir, save_name=save_name.strip())
 
-    update_log(self, f'Successfully exported analysis group with {saved_count} out of {len(plot_types)} plots to: {save_dir}')
+    update_log(self, f'Successfully exported analysis group with {saved_count} out of {len(plot_types) + len(data_rate_export_labels)} plots to: {save_dir}')
 
 
 def _unique_spec_display_name(self, basename):
@@ -3661,6 +3707,7 @@ def _collect_analysis_settings(self):
             'show_archive_data': self.show_data_chk_arc.isChecked(),
             'top_data': self.top_data_cbox.currentText(),
             'color_scale': self.clim_cbox.currentText(),
+            'data_rate_colormap': get_data_rate_colormap_label(self),
             'new_data_color_mode': 'by_type' if self.new_data_color_by_type_radio.isChecked() else 'single_color',
             'archive_data_color_mode': 'by_type' if self.archive_data_color_by_type_radio.isChecked() else 'single_color',
             'new_data_single_color': self.color.name() if hasattr(self, 'color') and hasattr(self.color, 'name') else None,
@@ -3765,6 +3812,8 @@ def save_settings_info(self, save_dir, save_name):
             f.write(f"Show Archive Data: {self.show_data_chk_arc.isChecked()}\n")
             f.write(f"Top Data: {self.top_data_cbox.currentText()}\n")
             f.write(f"Color Scale: {self.clim_cbox.currentText()}\n")
+            if hasattr(self, 'data_rate_cmap_cbox'):
+                f.write(f"Data Rate Colormap: {get_data_rate_colormap_label(self)}\n")
             
             # Color modes
             f.write("\nCOLOR MODES:\n")
@@ -3958,6 +4007,8 @@ def _apply_analysis_settings(self, payload):
         _set_combobox_text(self.top_data_cbox, plot_settings.get('top_data'))
     if hasattr(self, 'clim_cbox'):
         _set_combobox_text(self.clim_cbox, plot_settings.get('color_scale'))
+    if hasattr(self, 'data_rate_cmap_cbox'):
+        _set_combobox_text(self.data_rate_cmap_cbox, plot_settings.get('data_rate_colormap'))
 
     new_mode = plot_settings.get('new_data_color_mode')
     if new_mode == 'by_type' and hasattr(self, 'new_data_color_by_type_radio'):
@@ -4635,7 +4686,335 @@ def add_spec_lines_to_plot(self, ax):
             update_log(self, f'Failure plotting the specification lines: {str(e)}')
 
 
-def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary'):
+DATA_RATE_COLORMAP_LABELS = [
+    'Depth', 'Backscatter', 'Depth Mode', 'Pulse Form', 'Swath Mode', 'Frequency'
+]
+
+DATA_RATE_COLORMAP_EXPORT_SUFFIX = {
+    'Depth': 'Depth',
+    'Backscatter': 'Backscatter',
+    'Depth Mode': 'Depth_Mode',
+    'Pulse Form': 'Pulse_Form',
+    'Swath Mode': 'Swath_Mode',
+    'Frequency': 'Frequency',
+}
+
+
+def _data_rate_colormap_label_to_cmode(label):
+    return {
+        'Depth': 'depth',
+        'Backscatter': 'backscatter',
+        'Depth Mode': 'ping_mode',
+        'Pulse Form': 'pulse_form',
+        'Swath Mode': 'swath_mode',
+        'Frequency': 'frequency',
+    }.get(label, 'depth')
+
+
+def get_data_rate_colormap_label(self):
+    if hasattr(self, 'data_rate_cmap_cbox'):
+        text = self.data_rate_cmap_cbox.currentText().strip()
+        if text in DATA_RATE_COLORMAP_LABELS:
+            return text
+    return 'Depth'
+
+
+def _data_rate_should_color_by_type(self, is_archive):
+    if not getattr(self, 'match_data_cmodes_chk', None) or not self.match_data_cmodes_chk.isChecked():
+        return False
+    if is_archive:
+        return self.archive_data_color_by_type_radio.isChecked()
+    return self.new_data_color_by_type_radio.isChecked()
+
+
+def _reference_det_for_data_rate_style(self):
+    if getattr(self, 'det', None):
+        return self.det
+    archive = getattr(self, 'det_archive', {}) or {}
+    if archive:
+        return next(iter(archive.values()))
+    return {}
+
+
+def _build_data_rate_color_style(self, det, cmode):
+    """Build cmap/clim/cset metadata matching the corresponding plot tab."""
+    style = {
+        'cmode': cmode,
+        'categorical': False,
+        'cmap': 'rainbow',
+        'clim': [0, 1],
+        'cset': {},
+        'legend_label': '',
+        'invert_cbar': False,
+    }
+
+    if cmode == 'depth':
+        z_all = det.get('z_port', []) + det.get('z_stbd', [])
+        style['cmap'] = 'rainbow_r'
+        style['legend_label'] = 'Depth (m)'
+        style['invert_cbar'] = True
+        if hasattr(self, 'clim_cbox') and self.clim_cbox.currentText() == 'Filtered data':
+            z_lims_new = [float(self.min_depth_tb.text()), float(self.max_depth_tb.text())] * \
+                         int(getattr(self, 'show_data_chk', None) and self.show_data_chk.isChecked())
+            z_lims_arc = [float(self.min_depth_arc_tb.text()), float(self.max_depth_arc_tb.text())] * \
+                         int(getattr(self, 'show_data_chk_arc', None) and self.show_data_chk_arc.isChecked())
+            z_lims_checked = z_lims_new + z_lims_arc
+            if z_lims_checked:
+                style['clim'] = [min(z_lims_checked), max(z_lims_checked)]
+            elif z_all:
+                style['clim'] = [min(z_all), max(z_all)]
+            else:
+                style['clim'] = deepcopy(getattr(self, 'last_depth_clim', [0, 1000]))
+        elif hasattr(self, 'clim_cbox') and self.clim_cbox.currentText() == 'Custom Plot':
+            try:
+                min_val = float(self.min_z_tb.text()) if self.min_z_tb.text() else 0.0
+                max_val = float(self.max_z_tb.text()) if self.max_z_tb.text() else _custom_plot_max_depth(self)
+                style['clim'] = [min_val, max_val]
+            except ValueError:
+                style['clim'] = [min(z_all), max(z_all)] if z_all else deepcopy(getattr(self, 'last_depth_clim', [0, 1000]))
+        elif hasattr(self, 'clim_cbox') and self.clim_cbox.currentText() == 'Fixed limits':
+            style['clim'] = [float(self.min_clim_tb.text()), float(self.max_clim_tb.text())]
+        elif z_all:
+            style['clim'] = [min(z_all), max(z_all)]
+        else:
+            style['clim'] = deepcopy(getattr(self, 'last_depth_clim', [0, 1000]))
+
+    elif cmode == 'backscatter':
+        style['legend_label'] = 'Reported Backscatter (dB)'
+        style['clim'] = [-50, -10]
+        if self.bs_gb.isChecked() and hasattr(self, 'clim_cbox') and self.clim_cbox.currentText() == 'Filtered data':
+            style['clim'] = [float(self.min_bs_tb.text()), float(self.max_bs_tb.text())]
+
+    elif cmode == 'ping_mode':
+        style['categorical'] = True
+        c_set = {'Very Shallow': 'red', 'Shallow': 'darkorange', 'Medium': 'gold',
+                 'Deep': 'limegreen', 'Deeper': 'darkturquoise', 'Very Deep': 'blue',
+                 'Extra Deep': 'indigo', 'Extreme Deep': 'black'}
+        style['legend_label'] = 'Depth Mode'
+        modes = det.get('ping_mode', [])
+        mode_all_base = []
+        for m in modes:
+            base = str(m).split('(')[0].strip()
+            base = ' '.join(base.split()[:2])
+            mode_all_base.append(base)
+        if (hasattr(self, 'model_name') and
+                ('EM 2040' in self.model_name or 'EM2040' in self.model_name) and
+                any('kHz' in mode for mode in set(mode_all_base))):
+            c_set = {'400 kHz': 'red', '300 kHz': 'darkorange', '200 kHz': 'gold'}
+            style['legend_label'] = 'Freq. (EM 2040, SIS 4)'
+        style['cset'] = c_set
+        style['cmap'] = ListedColormap([c_set[k] for k in c_set.keys()])
+        style['clim'] = [0, len(c_set) - 1]
+
+    elif cmode == 'pulse_form':
+        style['categorical'] = True
+        c_set = {'CW': 'red', 'Mixed': 'limegreen', 'FM': 'blue'}
+        style['cset'] = c_set
+        style['legend_label'] = 'Pulse Form'
+        style['cmap'] = ListedColormap([c_set[k] for k in c_set.keys()])
+        style['clim'] = [0, len(c_set) - 1]
+
+    elif cmode == 'swath_mode':
+        style['categorical'] = True
+        c_set = {
+            'Single Swath': 'red',
+            'Dual Swath (Fixed)': 'blue',
+            'Dual Swath (Dynamic)': 'green',
+            'Dual Swath': 'blue',
+            'NA': 'gray',
+        }
+        unique_modes = list(set(det.get('swath_mode', [])))
+        actual_c_set = {}
+        available_colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray']
+        color_idx = 0
+        for mode in unique_modes:
+            if mode in c_set:
+                actual_c_set[mode] = c_set[mode]
+            else:
+                actual_c_set[mode] = available_colors[color_idx % len(available_colors)]
+                color_idx += 1
+        if not actual_c_set:
+            actual_c_set = {'Single Swath': 'red', 'Dual Swath': 'blue'}
+        style['cset'] = actual_c_set
+        style['legend_label'] = 'Swath Mode'
+        style['cmap'] = ListedColormap([actual_c_set[k] for k in actual_c_set.keys()])
+        style['clim'] = [0, len(actual_c_set) - 1]
+
+    elif cmode == 'frequency':
+        style['categorical'] = True
+        c_set = {'400 kHz': 'red', '300 kHz': 'darkorange', '200 kHz': 'gold',
+                 '70-100 kHz': 'limegreen', '40-100 kHz': 'darkturquoise', '40-70 kHz': 'blue',
+                 '30 kHz': 'indigo', '12 kHz': 'black', 'NA': 'white'}
+        style['cset'] = c_set
+        style['legend_label'] = 'Frequency'
+        style['cmap'] = ListedColormap([c_set[k] for k in c_set.keys()])
+        style['clim'] = [0, len(c_set) - 1]
+
+    if not style['categorical'] and (not style['clim'] or len(style['clim']) < 2 or style['clim'][0] == style['clim'][1]):
+        style['clim'] = [0, 1]
+    return style
+
+
+def _build_data_rate_ping_colors(self, det, cmode, style=None):
+    """Return one color value per ping for the selected data-rate colormap."""
+    if style is None:
+        style = _build_data_rate_color_style(self, det, cmode)
+    n = len(det.get('z_port', det.get('fname', [])))
+    if n == 0:
+        return np.array([])
+
+    if cmode == 'depth':
+        return np.mean([np.asarray(det.get('z_port', []), dtype=float),
+                        np.asarray(det.get('z_stbd', []), dtype=float)], axis=0)
+
+    if cmode == 'backscatter':
+        return np.mean([np.asarray(det.get('bs_port', []), dtype=float),
+                        np.asarray(det.get('bs_stbd', []), dtype=float)], axis=0)
+
+    if cmode == 'ping_mode':
+        modes = det.get('ping_mode', [''] * n)
+        mode_all_base = []
+        for m in modes:
+            base = str(m).split('(')[0].strip()
+            mode_all_base.append(' '.join(base.split()[:2]))
+        mode_to_index = {mode: idx for idx, mode in enumerate(style['cset'].keys())}
+        return np.asarray([mode_to_index.get(mode, 0) for mode in mode_all_base], dtype=float)
+
+    if cmode == 'pulse_form':
+        modes = det.get('pulse_form', [''] * n)
+        mode_to_index = {mode: idx for idx, mode in enumerate(style['cset'].keys())}
+        return np.asarray([mode_to_index.get(mode, 0) for mode in modes], dtype=float)
+
+    if cmode == 'swath_mode':
+        modes = det.get('swath_mode', [''] * n)
+        mode_to_index = {mode: idx for idx, mode in enumerate(style['cset'].keys())}
+        return np.asarray([mode_to_index.get(mode, 0) for mode in modes], dtype=float)
+
+    if cmode == 'frequency':
+        modes = det.get('frequency', [''] * n)
+        mode_to_index = {mode: idx for idx, mode in enumerate(style['cset'].keys())}
+        return np.asarray([mode_to_index.get(mode, 0) for mode in modes], dtype=float)
+
+    return np.zeros(n, dtype=float)
+
+
+def _data_rate_solid_colors(self, is_archive, count):
+    solid = colors.hex2color([self.color.name(), self.color_arc.name()][int(is_archive)])
+    return np.tile(np.asarray(solid), (count, 1))
+
+
+def _data_rate_scatter(self, ax, x, y, c_values, style=None, solid=False, **kwargs):
+    scatter_kwargs = dict(s=self.pt_size, marker='o', alpha=self.pt_alpha, linewidths=0)
+    scatter_kwargs.update(kwargs)
+    if solid:
+        return ax.scatter(x, y, c=c_values, **scatter_kwargs)
+    if style and style.get('categorical'):
+        return ax.scatter(x, y, c=c_values, cmap=style['cmap'],
+                          vmin=style['clim'][0], vmax=style['clim'][1], **scatter_kwargs)
+    return ax.scatter(x, y, c=c_values, cmap=style['cmap'],
+                      vmin=style['clim'][0], vmax=style['clim'][1], **scatter_kwargs)
+
+
+def update_data_rate_color_style(self, dr_colormap=None):
+    """Cache the active data-rate colormap style for legends and plotting."""
+    if not getattr(self, 'match_data_cmodes_chk', None) or not self.match_data_cmodes_chk.isChecked():
+        self._data_rate_color_style = None
+        return None
+    label = dr_colormap or get_data_rate_colormap_label(self)
+    cmode = _data_rate_colormap_label_to_cmode(label)
+    ref_det = _reference_det_for_data_rate_style(self)
+    self._data_rate_color_style = _build_data_rate_color_style(self, ref_det, cmode)
+    return self._data_rate_color_style
+
+
+def add_data_rate_ping_interval_legend(self):
+    """Show the selected data-rate colormap legend on the ping interval axis."""
+    params = self.cbar_dict.get('ping_interval') if hasattr(self, 'cbar_dict') else None
+    if not params:
+        return
+    ax = params['ax']
+    if params.get('cax'):
+        _safe_remove_cbar_dict_artist(params['cax'])
+        params['cax'] = None
+
+    loc = params.get('loc', 1)
+    font_size = getattr(self, 'cbar_font_size', 8)
+    title_size = getattr(self, 'cbar_title_font_size', 9)
+
+    if not getattr(self, 'colorbar_chk', None) or not self.colorbar_chk.isChecked():
+        h_dict = sort_legend_labels(self, ax)
+        if h_dict:
+            params['cax'] = ax.legend(handles=h_dict.values(), labels=h_dict.keys(),
+                                      fontsize=font_size, title_fontsize=title_size, loc=loc)
+        return
+
+    style = getattr(self, '_data_rate_color_style', None)
+    if (not style or not getattr(self, 'match_data_cmodes_chk', None)
+            or not self.match_data_cmodes_chk.isChecked()):
+        h_dict = sort_legend_labels(self, ax)
+        if h_dict:
+            params['cax'] = ax.legend(handles=h_dict.values(), labels=h_dict.keys(),
+                                      fontsize=font_size, title_fontsize=title_size, loc=loc)
+        return
+
+    if style.get('categorical'):
+        handles = [patches.Patch(color=c, label=l) for l, c in style['cset'].items()]
+        params['cax'] = ax.legend(handles=handles, title=style['legend_label'],
+                                  fontsize=font_size, title_fontsize=title_size, loc=loc)
+        return
+
+    clim0, clim1 = style['clim'][0], style['clim'][1]
+    if clim0 == clim1:
+        clim0 -= 0.5 if clim0 != 0 else -0.5
+        clim1 += 0.5 if clim1 != 0 else 0.5
+    tickvalues = np.linspace(clim0, clim1, 11).tolist()
+    ticklabels = [str(round(10 * float(tick)) / 10) for tick in tickvalues]
+    cbaxes = inset_axes(ax, width=0.20, height='30%', loc=loc)
+    cbar = colorbar.ColorbarBase(cbaxes, cmap=style['cmap'], orientation='vertical',
+                                 norm=colors.Normalize(clim0, clim1),
+                                 ticks=tickvalues, ticklocation=params.get('tickloc', 'left'))
+    cbar.ax.tick_params(labelsize=font_size)
+    cbar.set_label(label=style['legend_label'], size=title_size)
+    cbar.set_ticklabels(ticklabels)
+    if style.get('invert_cbar'):
+        cbar.ax.invert_yaxis()
+    params['cax'] = cbar
+
+
+def _plot_all_data_rate_series(self, dr_colormap=None):
+    """Plot all visible data-rate series using one colormap selection."""
+    update_data_rate_color_style(self, dr_colormap)
+    top_data_selection = self.top_data_cbox.currentText().strip() if hasattr(self, 'top_data_cbox') else ''
+    if not top_data_selection:
+        if self.show_data_chk.isChecked():
+            top_data_selection = 'New data'
+        elif self.show_data_chk_arc.isChecked():
+            top_data_selection = 'Archive data'
+
+    if self.show_data_chk_arc.isChecked() and top_data_selection != 'Archive data':
+        for k in getattr(self, 'det_archive', {}).keys():
+            plot_data_rate(self, self.det_archive[k], is_archive=True, det_name=k, dr_colormap=dr_colormap)
+
+    if getattr(self, 'det', None) and self.show_data_chk.isChecked():
+        plot_data_rate(self, self.det, is_archive=False, dr_colormap=dr_colormap)
+
+    if self.show_data_chk_arc.isChecked() and top_data_selection == 'Archive data':
+        for k in getattr(self, 'det_archive', {}).keys():
+            plot_data_rate(self, self.det_archive[k], is_archive=True, det_name=k, dr_colormap=dr_colormap)
+
+
+def refresh_data_rate_plots(self, dr_colormap=None):
+    """Clear and replot the data-rate figure using the requested colormap."""
+    self.data_rate_ax1.clear()
+    self.data_rate_ax2.clear()
+    update_axes(self)
+    _plot_all_data_rate_series(self, dr_colormap=dr_colormap)
+    add_data_rate_ping_interval_legend(self)
+    add_grid_lines(self)
+    update_other_plot_layouts(self)
+
+
+def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary', dr_colormap=None):
     # plot data rate and ping rate from loaded data (only new detections at present)
     # Debug print removed
 
@@ -4662,21 +5041,7 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
     except Exception:
         pass
 
-    c_all = deepcopy([self.c_all_data_rate, self.c_all_data_rate_arc][is_archive])
-    # Debug print removed
-
-    # split c_all according to color mode: if numeric, take the mean across port and stbd halves of the list to
-    # correspond with z_mean; if alpha mode (e.g., depth mode, where color is 'limegreen'), then take just the first
-    # half under of the color list under the assumption that port/stbd soundings from the same ping are associated
-    # with the same mode / color value
-    idx_split = int(len(c_all)/2)  # index between stbd and port soundings in color data from coverage plot
-    try:  # try taking numeric mean (e.g., depth, backscatter)
-        c_mean = np.mean([c_all[0:idx_split], c_all[idx_split:]], axis=0)
-
-    except:  # if numeric mean fails, assume text color info
-        c_mean = c_all[0:idx_split]
-
-    z_mean = np.mean([np.asarray(det['z_port']), np.asarray(det['z_stbd'])], axis=0)  # this might not be used in final
+    z_mean = np.mean([np.asarray(det['z_port']), np.asarray(det['z_stbd'])], axis=0)
 
     # Backward compatibility for older archives that may not include fsize/fsize_wc.
     # Normalize both series so downstream calculations do not fail on missing keys.
@@ -4758,15 +5123,19 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
     sort_idx = np.argsort(time_obj)  # sort indices of ping times (len = ping count)
     time_sorted = [time_obj[i] for i in sort_idx]
     z_mean_sorted = [z_mean[i] for i in sort_idx]
-    c_mean_sorted = [c_mean[i] for i in sort_idx]
     fnames_sorted = [det['fname'][i] for i in sort_idx]  # sort filenames by ping sort
     wcd_fac_sorted = [wcd_fac[i] for i in sort_idx]
 
-    time_sorted = [time_obj[i] for i in sort_idx]
-    z_mean_sorted = [z_mean[i] for i in sort_idx]
-    c_mean_sorted = [c_mean[i] for i in sort_idx]
-    fnames_sorted = [det['fname'][i] for i in sort_idx]  # sort filenames by ping sort
-    wcd_fac_sorted = [wcd_fac[i] for i in sort_idx]
+    dr_cmode = _data_rate_colormap_label_to_cmode(dr_colormap or get_data_rate_colormap_label(self))
+    style = getattr(self, '_data_rate_color_style', None)
+    if style is None or style.get('cmode') != dr_cmode:
+        style = _build_data_rate_color_style(self, det, dr_cmode)
+    use_colormap = _data_rate_should_color_by_type(self, is_archive)
+    if use_colormap:
+        c_mean = _build_data_rate_ping_colors(self, det, dr_cmode, style=style)
+        c_mean_sorted = [c_mean[i] for i in sort_idx]
+    else:
+        c_mean_sorted = None
 
     # check whether detection dict has the byte field to calculate data rate (older archives may not)
     print('det.keys =', det.keys())
@@ -5039,9 +5408,6 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
     # print('first 30 values:', dr_smoothed[0:30], dt_s_final[0:30], self.fnames_sorted[0:30],
     # 	  c_mean_sorted[0:30], z_mean_sorted[0:30])
 
-    cmode = [self.cmode, self.cmode_arc][int(is_archive)]
-    if cmode == 'color_by_type':
-        cmode = 'depth'
     local_label = ('Archive data' if is_archive else 'New data')
 
     # update x limits for axis resizing during each plot call
@@ -5102,23 +5468,35 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
     dr_smoothed_total_arr = np.asarray(dr_smoothed_total)
     dt_s_final_arr = np.asarray(dt_s_final)
     
-    # Ensure c_mean_sorted is a numpy array for proper indexing
-    c_mean_sorted_arr = np.asarray(c_mean_sorted) if hasattr(c_mean_sorted, '__len__') else c_mean_sorted
+    # Ensure c_mean_sorted is a numpy array for proper indexing when using colormap values
+    if c_mean_sorted is not None:
+        c_mean_sorted_arr = np.asarray(c_mean_sorted) if hasattr(c_mean_sorted, '__len__') else c_mean_sorted
+    else:
+        c_mean_sorted_arr = None
     
     valid_mask = ~(np.isnan(dr_smoothed_arr) | np.isnan(z_mean_sorted_arr) | np.isinf(dr_smoothed_arr) | np.isinf(z_mean_sorted_arr) | (dr_smoothed_arr < 0) | (z_mean_sorted_arr < -10000))
     dr_smoothed_valid = dr_smoothed_arr[valid_mask]
     z_mean_sorted_valid = z_mean_sorted_arr[valid_mask]
-    c_mean_sorted_valid = c_mean_sorted_arr[valid_mask] if hasattr(c_mean_sorted_arr, '__len__') else c_mean_sorted_arr
+    if c_mean_sorted_arr is not None:
+        c_mean_sorted_valid = c_mean_sorted_arr[valid_mask]
+    else:
+        c_mean_sorted_valid = _data_rate_solid_colors(self, is_archive, len(z_mean_sorted_valid))
     
     valid_mask_total = ~(np.isnan(dr_smoothed_total_arr) | np.isnan(z_mean_sorted_arr) | np.isinf(dr_smoothed_total_arr) | np.isinf(z_mean_sorted_arr) | (dr_smoothed_total_arr < 0) | (z_mean_sorted_arr < -10000))
     dr_smoothed_total_valid = dr_smoothed_total_arr[valid_mask_total]
     z_mean_sorted_total_valid = z_mean_sorted_arr[valid_mask_total]
-    c_mean_sorted_total_valid = c_mean_sorted_arr[valid_mask_total] if hasattr(c_mean_sorted_arr, '__len__') else c_mean_sorted_arr
+    if c_mean_sorted_arr is not None:
+        c_mean_sorted_total_valid = c_mean_sorted_arr[valid_mask_total]
+    else:
+        c_mean_sorted_total_valid = _data_rate_solid_colors(self, is_archive, len(z_mean_sorted_total_valid))
     
     valid_mask_dt = ~(np.isnan(dt_s_final_arr) | np.isnan(z_mean_sorted_arr) | np.isinf(dt_s_final_arr) | np.isinf(z_mean_sorted_arr) | (dt_s_final_arr < 0) | (z_mean_sorted_arr < -10000))
     dt_final_valid = dt_s_final_arr[valid_mask_dt]
     z_mean_sorted_dt_valid = z_mean_sorted_arr[valid_mask_dt]
-    c_mean_sorted_dt_valid = c_mean_sorted_arr[valid_mask_dt] if hasattr(c_mean_sorted_arr, '__len__') else c_mean_sorted_arr
+    if c_mean_sorted_arr is not None:
+        c_mean_sorted_dt_valid = c_mean_sorted_arr[valid_mask_dt]
+    else:
+        c_mean_sorted_dt_valid = _data_rate_solid_colors(self, is_archive, len(z_mean_sorted_dt_valid))
     
     # Additional validation: ensure we have valid data to plot
     if not skip_left_data_rate_plot and len(dr_smoothed_valid) == 0:
@@ -5140,64 +5518,24 @@ def plot_data_rate(self, det, is_archive=False, det_name='detection dictionary')
     # DEBUG: Filtered data - dt_final: {len(dt_final_valid)}/{len(dt_s_final)} valid points
 
     try:
-        if self.match_data_cmodes_chk.isChecked() and self.last_cmode != 'solid_color':
+        use_colormap = _data_rate_should_color_by_type(self, is_archive)
+        plot_solid = not use_colormap
 
-            if not skip_left_data_rate_plot:
-                self.h_data_rate_smoothed = self.data_rate_ax1.scatter(dr_smoothed_valid, z_mean_sorted_valid,
-                                                                       s=self.pt_size, c=c_mean_sorted_valid, marker='o',
-                                                                       label=local_label,
-                                                                       vmin=self.clim[0], vmax=self.clim[1], cmap=self.cmap,
-                                                                       alpha=self.pt_alpha, linewidths=0)
+        if not skip_left_data_rate_plot:
+            self.h_data_rate_smoothed = _data_rate_scatter(
+                self, self.data_rate_ax1, dr_smoothed_valid, z_mean_sorted_valid, c_mean_sorted_valid,
+                style=style, solid=plot_solid, label=local_label, marker='o')
+            self.h_data_rate_smoothed_total = _data_rate_scatter(
+                self, self.data_rate_ax1, dr_smoothed_total_valid, z_mean_sorted_total_valid,
+                c_mean_sorted_total_valid, style=style, solid=plot_solid, label=local_label, marker='+')
 
-                self.h_data_rate_smoothed_total = self.data_rate_ax1.scatter(dr_smoothed_total_valid, z_mean_sorted_total_valid,
-                                                                             s=self.pt_size, c=c_mean_sorted_total_valid, marker='+',
-                                                                             label=local_label,
-                                                                             vmin=self.clim[0], vmax=self.clim[1], cmap=self.cmap,
-                                                                             alpha=self.pt_alpha, linewidths=0)
+        self.h_ping_interval = _data_rate_scatter(
+            self, self.data_rate_ax2, dt_final_valid, z_mean_sorted_dt_valid, c_mean_sorted_dt_valid,
+            style=style, solid=plot_solid, label=local_label, marker='o')
 
-            self.h_ping_interval = self.data_rate_ax2.scatter(dt_final_valid, z_mean_sorted_dt_valid,
-                                                              s=self.pt_size, c=c_mean_sorted_dt_valid, marker='o',
-                                                              label=local_label,
-                                                              vmin=self.clim[0], vmax=self.clim[1], cmap=self.cmap,
-                                                              alpha=self.pt_alpha, linewidths=0)
+        if plot_solid and not skip_left_data_rate_plot:
+            self.legend_handles_data_rate.append(self.h_data_rate_smoothed)
 
-            # self.legend_handles_data_rate.append(h_data_rate)  # append handles for legend with 'New data' or 'Archive data'
-            self.legend_handles_data_rate = [h for h in self.legend_handles]  # save swath legend handle info for data plots
-
-
-        else:  # use solid colors for data rate plots (new/archive) if not applying the swath plot color modes
-            if is_archive:  # use archive solid color
-                c_mean_sorted_valid = np.tile(np.asarray(colors.hex2color(self.color_arc.name())), (len(z_mean_sorted_valid), 1))
-                c_mean_sorted_total_valid = np.tile(np.asarray(colors.hex2color(self.color_arc.name())), (len(z_mean_sorted_total_valid), 1))
-                c_mean_sorted_dt_valid = np.tile(np.asarray(colors.hex2color(self.color_arc.name())), (len(z_mean_sorted_dt_valid), 1))
-
-            else:  # get new data solid color
-                c_mean_sorted_valid = np.tile(np.asarray(colors.hex2color(self.color.name())), (len(z_mean_sorted_valid), 1))
-                c_mean_sorted_total_valid = np.tile(np.asarray(colors.hex2color(self.color.name())), (len(z_mean_sorted_total_valid), 1))
-                c_mean_sorted_dt_valid = np.tile(np.asarray(colors.hex2color(self.color.name())), (len(z_mean_sorted_dt_valid), 1))
-
-            if not skip_left_data_rate_plot:
-                self.h_data_rate_smoothed = self.data_rate_ax1.scatter(dr_smoothed_valid, z_mean_sorted_valid,
-                                                                       s=self.pt_size, c=c_mean_sorted_valid,
-                                                                       label=local_label, marker='o',
-                                                                       alpha=self.pt_alpha, linewidths=0)
-
-                self.h_data_rate_smoothed_total = self.data_rate_ax1.scatter(dr_smoothed_total_valid, z_mean_sorted_total_valid,
-                                                                             s=self.pt_size, c=c_mean_sorted_total_valid,
-                                                                             label=local_label, marker='+',
-                                                                             alpha=self.pt_alpha, linewidths=0)
-
-            self.h_ping_interval = self.data_rate_ax2.scatter(dt_final_valid, z_mean_sorted_dt_valid,
-                                                              s=self.pt_size, c=c_mean_sorted_dt_valid,
-                                                              label=local_label,
-                                                              marker='o', alpha=self.pt_alpha, linewidths=0)
-
-            if not skip_left_data_rate_plot:
-                self.legend_handles_data_rate.append(self.h_data_rate_smoothed)  # append handles for legend with 'New data' or 'Archive data'
-            # self.legend_handles_data_rate.append(self.h_data_rate_smoothed)  # append handles for legend with 'New data' or 'Archive data'
-            
-        # DEBUG: Successfully plotted data rate
-        
     except Exception as e:
         # DEBUG: Failed to plot data rate: {e}
         # DEBUG: dr_smoothed shape: {np.shape(dr_smoothed)}, z_mean_sorted shape: {np.shape(z_mean_sorted)}

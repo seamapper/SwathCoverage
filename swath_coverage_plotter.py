@@ -105,6 +105,9 @@ class MainWindow(QtWidgets.QMainWindow):
     PLOT_LIMIT_TEXTBOX_NAMES = frozenset({
         'min_z_tb', 'max_z_tb', 'max_x_tb', 'max_dr_tb', 'max_pi_tb',
     })
+    # System info fields keep their on-screen values during refresh_plot; they are not
+    # temporarily swapped to last-committed values like filter parameters.
+    SYSTEM_INFO_LINEEDIT_NAMES = frozenset({'ship_tb', 'cruise_tb'})
     # Preferred panel content size; scrollbars appear when the viewport is smaller.
     WINDOW_DEFAULT_HEIGHT = 1100
     # Side columns keep content height at the default window size; scroll vertically below that.
@@ -392,6 +395,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.pt_size_cbox,
                     self.pt_alpha_cbox,
                     self.clim_cbox,
+                    self.data_rate_cmap_cbox,
                     self.top_data_cbox,
                     self.ref_cbox]
 
@@ -641,6 +645,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, 'min_clim_tb') and hasattr(self, 'clim_cbox'):
             for tb in (self.min_clim_tb, self.max_clim_tb):
                 self._apply_line_edit_style(tb)
+        self._update_data_rate_colormap_enabled()
+
+    def _update_data_rate_colormap_enabled(self):
+        """Disable Data Rate colormap selection when data plots use solid colors only."""
+        if not hasattr(self, 'data_rate_cmap_cbox'):
+            return
+        enabled = hasattr(self, 'match_data_cmodes_chk') and self.match_data_cmodes_chk.isChecked()
+        self.data_rate_cmap_cbox.setEnabled(enabled)
 
     def _on_checkable_groupbox_toggled(self, checked, gb):
         """Refresh plot when a filter/limit groupbox is enabled or disabled."""
@@ -697,6 +709,8 @@ class MainWindow(QtWidgets.QMainWindow):
         """Temporarily show committed values in line edits for plot/filter logic."""
         drafts = {}
         for name, widget in self._filter_line_edits.items():
+            if name in self.SYSTEM_INFO_LINEEDIT_NAMES:
+                continue
             committed = self._filter_text_committed.get(name, widget.text())
             drafts[name] = widget.text()
             if drafts[name] != committed:
@@ -708,6 +722,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _restore_filter_text_drafts(self, drafts):
         """Restore in-progress edits after refresh_plot uses committed values."""
         for name, draft in drafts.items():
+            if name in self.SYSTEM_INFO_LINEEDIT_NAMES:
+                continue
             widget = self._filter_line_edits.get(name)
             if widget is not None and widget.text() != draft:
                 widget.blockSignals(True)
@@ -1967,7 +1983,15 @@ class MainWindow(QtWidgets.QMainWindow):
                                   'Note: The order of plotting can be reversed by the user, e.g., to '
                                   'plot archive data on top.')
         clim_options_layout = BoxLayout([clim_cbox_lbl, self.clim_cbox], 'h')
-        pt_param_layout_top = BoxLayout([top_data_layout, clim_options_layout], 'v')
+        data_rate_cmap_lbl = Label('Data Rate Colormap:', width=90,
+                                   alignment=(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        self.data_rate_cmap_cbox = ComboBox(
+            ['Depth', 'Backscatter', 'Depth Mode', 'Pulse Form', 'Swath Mode', 'Frequency'],
+            90, 20, 'data_rate_cmap_cbox',
+            'Select the variable used to color points on the Data Rate and Ping Interval plots.'
+        )
+        data_rate_cmap_layout = BoxLayout([data_rate_cmap_lbl, self.data_rate_cmap_cbox], 'h')
+        pt_param_layout_top = BoxLayout([top_data_layout, clim_options_layout, data_rate_cmap_layout], 'v')
         pt_param_layout_top.addStretch()
 
         # add fixed color limit options

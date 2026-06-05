@@ -332,6 +332,17 @@ def show_file_paths(self): #, show_path=False):
 		# self.file_list.item(i).setText((path + '/') * int(show_path) + fname)
 
 
+def _sync_system_info_lineedit_commit(self, widget_name):
+	"""Keep enter-to-commit state aligned after programmatic ship/cruise updates."""
+	if not hasattr(self, '_filter_text_committed'):
+		return
+	widget = getattr(self, widget_name, None)
+	if widget is not None:
+		self._filter_text_committed[widget_name] = widget.text()
+		if hasattr(self, '_apply_line_edit_style'):
+			self._apply_line_edit_style(widget)
+
+
 def update_system_info(self, det, force_update=False, fname_str_replace=''):
 	# update model, serial number, ship, cruise info based on detection info and/or custom fields
 	if self.custom_info_gb.isChecked():  # use custom info if checked
@@ -350,6 +361,7 @@ def update_system_info(self, det, force_update=False, fname_str_replace=''):
 
 		if not self.ship_name_updated or force_update:
 			self.ship_tb.setText(self.ship_name)  # update custom info text box
+			_sync_system_info_lineedit_commit(self, 'ship_tb')
 			update_log(self, 'Updated ship name to ' + self.ship_tb.text() + ' (first file name ending)')
 			self.ship_name_updated = True
 
@@ -361,6 +373,7 @@ def update_system_info(self, det, force_update=False, fname_str_replace=''):
 
 		if not self.cruise_name_updated or force_update:
 			self.cruise_tb.setText(self.cruise_name)  # update custom info text box
+			_sync_system_info_lineedit_commit(self, 'cruise_tb')
 			update_log(self, 'Updated cruise name to ' + self.cruise_tb.text() + ' (first survey ID found, if any)')
 			self.cruise_name_updated = True
 
