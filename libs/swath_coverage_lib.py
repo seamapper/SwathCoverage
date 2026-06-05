@@ -3363,42 +3363,10 @@ def save_all_plots(self):
     ]
     if getattr(self, 'timing_data_extracted', False):
         plot_types.append(('Timing', self.time_figure))
-    
-    # Check for existing files and ask for overwrite permission
-    existing_files = []
-    for plot_type, figure in plot_types:
-        if figure and hasattr(figure, 'savefig'):
-            # Build filename with simple prefix + plot type format
-            filename = f"{save_name.strip()}_{plot_type}.png"
-            filepath = os.path.join(save_dir, filename)
-            if os.path.exists(filepath):
-                existing_files.append(filename)
-    
-    # Also check for settings and analysis export files
-    settings_filename = f"{save_name.strip()}_settings.txt"
-    settings_filepath = os.path.join(save_dir, settings_filename)
-    if os.path.exists(settings_filepath):
-        existing_files.append(settings_filename)
-    analysis_filename = f"{save_name.strip()}_analysis_group.json"
-    analysis_filepath = os.path.join(save_dir, analysis_filename)
-    if os.path.exists(analysis_filepath):
-        existing_files.append(analysis_filename)
-    acquisition_log_filepath = os.path.join(save_dir, 'acquisition_log.csv')
-    if os.path.exists(acquisition_log_filepath):
-        existing_files.append('acquisition_log.csv')
-    
-    # Ask user for permission to overwrite if files exist
-    if existing_files:
-        from PyQt6.QtWidgets import QMessageBox
-        file_list = "\n".join([f"  • {f}" for f in existing_files])
-        msg = f"The following files already exist:\n{file_list}\n\nDo you want to overwrite them?"
-        reply = QMessageBox.question(self, 'Overwrite Files?', msg, 
-                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                    QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.No:
-            update_log(self, 'Save operation cancelled by user')
-            return
-    
+
+    if os.path.isdir(save_dir) and os.listdir(save_dir):
+        update_log(self, f'Overwriting existing export files in: {save_dir}')
+
     # Save filter settings and source files info
     save_settings_info(self, save_dir, save_name.strip())
     save_analysis_group_json(self, save_dir, save_name.strip())
@@ -4335,16 +4303,7 @@ def convert_swath_pkl_to_archive(self):
 
     fname_out = os.path.join(parent_dir, f'{archive_basename}.pkl')
     if os.path.exists(fname_out):
-        overwrite = QtWidgets.QMessageBox.question(
-            self,
-            'Overwrite Existing File?',
-            f'Archive file already exists:\n{fname_out}\n\nOverwrite it?',
-            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
-            QtWidgets.QMessageBox.StandardButton.No
-        )
-        if overwrite != QtWidgets.QMessageBox.StandardButton.Yes:
-            update_log(self, 'Swath PKL to Archive conversion cancelled (existing file not overwritten).')
-            return
+        update_log(self, f'Overwriting existing archive file: {fname_out}')
 
     det_archive = deepcopy(self.det)
     det_archive['model_name'] = self.model_name
