@@ -8,8 +8,17 @@ import sys
 import os
 import pickle
 # Import kmall from the same directory
-from .kmall import kmall
+from .kmall import kmall, _KMALL_MIN_DGRAM_SIZE
 import utm
+from .parse_guard import (
+	ParseGuardError,
+	begin_file_parse,
+	check_cancel,
+	validate_all_dg_len,
+	record_resync_error,
+	validate_kmall_mrz_counts,
+	MAX_KMALL_TX_SECTORS,
+)
 
 _KMALL_SOUNDING_FORMAT = "1H8B1H6f2H18f4H"
 _KMALL_SOUNDING_STRUCT = struct.Struct(_KMALL_SOUNDING_FORMAT)
@@ -42,9 +51,11 @@ def readALLswath(self, filename, print_updates=False, parse_outermost_only=False
 	# likewise, if params only are parsed, the most recent RTP or IP data are copied to the next valid ping time (and
 	# ensuing XYZ datagrams are skipped until another param datagram is found; no swath data are parsed or stored)
 	print("\nParsing file:", filename)
+	begin_file_parse()
 	f = open(filename, 'rb')
 	raw = f.read()
 	len_raw = len(raw)
+	f.close()
 
 	# initialize data dict with remaining datagram fields
 	data = {'fname': filename, 'XYZ': {}, 'RTP': {}, 'RRA': {}, 'IP': {}, 'POS': {}}
@@ -66,14 +77,16 @@ def readALLswath(self, filename, print_updates=False, parse_outermost_only=False
 	loop_num = 0
 	last_dg_start = 0  # store number of bytes since last XYZ88 datagram
 	skip_xyz = parse_params_only
+	resync_errors = 0
 
 	# Assign and parse datagram
 	# while dg_start <= len_raw:  # and dg_count < 10:
 	while True:
 		loop_num = loop_num + 1
+		check_cancel(loop_num)
 
 		# print progress update
-		parse_prog = round(10 * dg_start / len_raw)
+		parse_prog = round(10 * dg_start / len_raw) if len_raw else 10
 		if parse_prog > parse_prog_old:
 			print("%s%%" % (parse_prog * 10) + ('\n' if parse_prog == 10 else ''), end=" ", flush=True)
 			parse_prog_old = parse_prog
@@ -84,14 +97,16 @@ def readALLswath(self, filename, print_updates=False, parse_outermost_only=False
 		dg_len = struct.unpack('I', raw[dg_start:dg_start + 4])[0]  # get dg length (before start of dg at STX)
 
 		# skip to next iteration if dg length is insufficient to check for STX, ID, and ETX, or dg end is beyond EOF
-		if dg_len < 3:
+		if not validate_all_dg_len(dg_len, len_raw):
 			dg_start = dg_start + 4
+			resync_errors = record_resync_error(resync_errors, filename)
 			continue
 
 		dg_end = dg_start + 4 + dg_len
 
 		if dg_end > len_raw:
 			dg_start = dg_start + 4
+			resync_errors = record_resync_error(resync_errors, filename)
 			continue
 
 		# if dg_end <= len_raw:  # try to read dg if len seems reasonable and not EOF
@@ -184,6 +199,7 @@ def readALLswath(self, filename, print_updates=False, parse_outermost_only=False
 		# if no condition was met to read and jump ahead not valid, move ahead by 1 and continue search
 		# (will start read dg_len at -4 on next loop)
 		dg_start = dg_start + 1
+		resync_errors = record_resync_error(resync_errors, filename)
 	# print('STX or ETX not valid, moving ahead by 1 to new dg_start', dg_start)
 
 	# loop through the XYZ and RRA data, store angles re RX array associated with each outermost sounding;
@@ -365,6 +381,7 @@ def readKMALLswath(self, filename, print_updates=False, include_skm=False, parse
 	# ensuing XYZ datagrams are skipped until another param datagram is found; no swath data are parsed or stored)
 
 	km = kmall_data(filename, save_index_file=save_index_file)  # kmall_data class inheriting kmall class and adding extract_dg method
+	begin_file_parse()
 	km.load_or_index_file()
 	km.report_packet_types()
 
@@ -752,22 +769,40 @@ class kmall_data(kmall):
 
 		parsed = {}
 		parsed['header'] = self.read_EMdgmHeader()
+		num_bytes_dgm = parsed['header']['numBytesDgm']
+		if num_bytes_dgm < _KMALL_MIN_DGRAM_SIZE or offset + num_bytes_dgm > self.file_size:
+			raise ParseGuardError(
+				f'Invalid MRZ datagram size {num_bytes_dgm} at offset {offset}'
+			)
 		parsed['partition'] = self.read_EMdgmMpartition()
 		parsed['cmnPart'] = self.read_EMdgmMbody()
 		parsed['pingInfo'] = self.read_EMdgmMRZ_pingInfo()
 
 		num_tx_sectors = parsed['pingInfo']['numTxSectors']
+		if num_tx_sectors < 0 or num_tx_sectors > MAX_KMALL_TX_SECTORS:
+			raise ParseGuardError(f'Invalid numTxSectors: {num_tx_sectors}')
 		for sector in range(num_tx_sectors):
 			self.read_EMdgmMRZ_txSectorInfo()
 
 		parsed['rxInfo'] = self.read_EMdgmMRZ_rxInfo()
 
 		num_extra_classes = parsed['rxInfo']['numExtraDetectionClasses']
+		num_soundings = (parsed['rxInfo']['numExtraDetections'] +
+		                 parsed['rxInfo']['numSoundingsMaxMain'])
+		validate_kmall_mrz_counts(
+			num_tx_sectors, num_extra_classes, num_soundings, num_bytes_dgm, self.FID.tell() - start
+		)
+
 		for detclass in range(num_extra_classes):
 			self.read_EMdgmMRZ_extraDetClassInfo()
 
-		num_soundings = (parsed['rxInfo']['numExtraDetections'] +
-		                 parsed['rxInfo']['numSoundingsMaxMain'])
+		remaining = num_bytes_dgm - (self.FID.tell() - start)
+		sounding_bytes = num_soundings * _KMALL_SOUNDING_SIZE
+		if sounding_bytes > remaining:
+			raise ParseGuardError(
+				f'MRZ sounding block ({sounding_bytes} bytes) exceeds remaining datagram size'
+			)
+
 		if num_soundings > 0:
 			chunk = self.FID.read(num_soundings * _KMALL_SOUNDING_SIZE)
 			det_types = np.frombuffer(chunk, dtype=np.uint8).reshape(num_soundings, _KMALL_SOUNDING_SIZE)[:, _KMALL_SOUNDING_DET_TYPE_OFFSET]
@@ -792,12 +827,21 @@ class kmall_data(kmall):
 
 		parsed = {}
 		parsed['header'] = self.read_EMdgmHeader()
+		num_bytes_dgm = parsed['header']['numBytesDgm']
+		if num_bytes_dgm < _KMALL_MIN_DGRAM_SIZE or offset + num_bytes_dgm > self.file_size:
+			raise ParseGuardError(
+				f'Invalid MRZ datagram size {num_bytes_dgm} at offset {offset}'
+			)
 		parsed['partition'] = self.read_EMdgmMpartition()
 		parsed['cmnPart'] = self.read_EMdgmMbody()
 		parsed['pingInfo'] = self.read_EMdgmMRZ_pingInfo()
+		if parsed['pingInfo']['numTxSectors'] < 0 or parsed['pingInfo']['numTxSectors'] > MAX_KMALL_TX_SECTORS:
+			raise ParseGuardError(
+				f"Invalid numTxSectors: {parsed['pingInfo']['numTxSectors']}"
+			)
 		parsed['start_byte'] = offset
 
-		self.FID.seek(start + parsed['header']['numBytesDgm'], 0)
+		self.FID.seek(start + num_bytes_dgm, 0)
 		return parsed
 
 	def extract_coverage_datagrams(self, read_mode='plot', include_skm=False, parse_params_only=False):
@@ -817,6 +861,7 @@ class kmall_data(kmall):
 		               "b'#IIP'": ('iip', self.read_EMdgmIIP, iip_list)}
 
 		for offset, msgtype in zip(self.msgoffset, self.msgtype):
+			check_cancel()
 			if msgtype == "b'#MRZ'":
 				if parse_params_only or read_mode == 'param':
 					mrz_list.append(self._read_mrz_param_at_offset(offset))

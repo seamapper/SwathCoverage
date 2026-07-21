@@ -3298,8 +3298,11 @@ class kmall():
         self.msgtime = []
         self.msgtype = []
         self.pktcnt = 0
+        resync_errors = 0
+        from .parse_guard import check_cancel, record_resync_error
 
         while self.FID.tell() < self.file_size:
+            check_cancel(self.pktcnt)
 
             try:
                 offset = self.FID.tell()
@@ -3343,7 +3346,11 @@ class kmall():
 
                 self.msgoffset = self.msgoffset[:-1]
                 self.msgsize = self.msgsize[:-1]
+                pos_before = self.FID.tell()
                 self.scanToDatagram()
+                if self.FID.tell() <= pos_before:
+                    self.FID.seek(min(pos_before + 1, self.file_size))
+                resync_errors = record_resync_error(resync_errors, self.filename)
 
                 continue
             except Exception:
@@ -3351,7 +3358,11 @@ class kmall():
 
                 self.msgoffset = self.msgoffset[:-1]
                 self.msgsize = self.msgsize[:-1]
+                pos_before = self.FID.tell()
                 self.scanToDatagram()
+                if self.FID.tell() <= pos_before:
+                    self.FID.seek(min(pos_before + 1, self.file_size))
+                resync_errors = record_resync_error(resync_errors, self.filename)
 
                 continue
 
@@ -3785,16 +3796,27 @@ class kmall():
                 return False
             # consider start bytes right at the end of the given filelength as valid, even if they extend
             # over to the next chunk
-            srchdat = self.FID.read(min(20, (start_ptr + file_length) - cur_ptr))
+            remaining = (start_ptr + file_length) - cur_ptr
+            srchdat = self.FID.read(min(20, remaining))
+            if not srchdat:
+                return False
             stx_idx = srchdat.find(b'#')
             if stx_idx >= 0:
                 possible_start = cur_ptr + stx_idx
                 self.FID.seek(possible_start)
                 datchk = self.FID.read(4)
+                if len(datchk) < 4:
+                    self.FID.seek(cur_ptr + 1)
+                    continue
                 m = self.datagram_ident_search.search(datchk, 0)
                 if m:
                     self.FID.seek(possible_start - 4)
                     return True
+                # False positive: advance past this '#'.
+                self.FID.seek(possible_start + 1)
+            else:
+                # No marker in this window; advance and keep searching.
+                self.FID.seek(cur_ptr + len(srchdat))
 
     def _divide_rec(self, rec):
         """

@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.16" 
+__version__ = "2026.18" 
 
 # BSD-3-Clause License
 #
@@ -112,7 +112,7 @@ class MainWindow(QtWidgets.QMainWindow):
     WINDOW_DEFAULT_HEIGHT = 1100
     # Side columns keep content height at the default window size; scroll vertically below that.
     PANEL_SIDE_MIN_HEIGHT = WINDOW_DEFAULT_HEIGHT - 40
-    PANEL_MIN_LEFT = (325, PANEL_SIDE_MIN_HEIGHT)
+    PANEL_MIN_LEFT = (350, PANEL_SIDE_MIN_HEIGHT)
     TAB_PANEL_WIDTH = 300
     PANEL_MIN_RIGHT = (TAB_PANEL_WIDTH, PANEL_SIDE_MIN_HEIGHT)
     CENTER_OPEN_WIDTH = 950
@@ -1062,6 +1062,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.file_list.model():
             self.file_list.model().rowsInserted.connect(self.update_file_buttons)
             self.file_list.model().rowsRemoved.connect(self.update_file_buttons)
+            self.file_list.model().rowsInserted.connect(self._reapply_raw_file_list_filter)
         
         # Create tabbed widget for the sources section
         self.sources_tab_widget = QtWidgets.QTabWidget()
@@ -1086,14 +1087,18 @@ class MainWindow(QtWidgets.QMainWindow):
         convert_swath_pkl_gb = GroupBox('Convert to Swath PKL', swath_pkl_group_layout, False, False, 'convert_swath_pkl_gb')
         convert_archive_pkl_gb = GroupBox('Convert to Archive PKL', archive_group_layout, False, False, 'convert_archive_pkl_gb')
         
-        # Show path checkbox for raw swath sources
+        # Show path checkbox and filter for raw swath sources
         self.show_path_chk = CheckBox('Show Path', False, 'show_path_chk',
                                       'Show full file path along with filename in the file list')
+        self.file_list_filter = self._make_source_list_filter(
+            'file_list_filter',
+            'Select list items whose path or filename contains this text (case insensitive)'
+        )
         
         # Swath sources file list with show path checkbox and file controls
         swath_sources_layout = QtWidgets.QVBoxLayout()
         swath_sources_layout.addWidget(self.file_list)
-        swath_sources_layout.addWidget(self.show_path_chk)
+        swath_sources_layout.addLayout(self._make_show_path_filter_row(self.show_path_chk, self.file_list_filter))
         raw_add_layout = QtWidgets.QHBoxLayout()
         raw_add_layout.addWidget(self.add_file_btn, 1)
         raw_add_layout.addWidget(self.get_indir_btn, 1)
@@ -1109,6 +1114,9 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Connect show path checkbox signal after it's created
         self.show_path_chk.toggled.connect(self.toggle_file_path_display)
+        self.file_list_filter.textChanged.connect(
+            lambda text: self._select_matching_source_files(self.file_list, text, 'raw')
+        )
         
         # Combine raw swath components
         raw_swath_layout.addWidget(swath_sources_gb, 1)  # Give file list more space
@@ -1129,18 +1137,27 @@ class MainWindow(QtWidgets.QMainWindow):
         swath_pkl_btn_layout = BoxLayout([add_remove_layout, dir_clear_layout, self.convert_swath_pkl_archive_btn, self.include_pkl_subdir_chk], 'v')
         swath_pkl_btn_gb = GroupBox('Swath PKL Management', swath_pkl_btn_layout, False, False, 'swath_pkl_btn_gb')
         
-        # Show path checkbox for swath PKL sources
+        # Show path checkbox and filter for swath PKL sources
         self.show_swath_pkl_path_chk = CheckBox('Show Path', False, 'show_swath_pkl_path_chk',
                                                 'Show full file path along with filename in the Swath PKL file list')
+        self.swath_pkl_list_filter = self._make_source_list_filter(
+            'swath_pkl_list_filter',
+            'Select list items whose path or filename contains this text (case insensitive)'
+        )
         
         # Swath PKL file list with show path checkbox
         swath_pkl_sources_layout = QtWidgets.QVBoxLayout()
         swath_pkl_sources_layout.addWidget(self.swath_pkl_file_list)
-        swath_pkl_sources_layout.addWidget(self.show_swath_pkl_path_chk)
+        swath_pkl_sources_layout.addLayout(
+            self._make_show_path_filter_row(self.show_swath_pkl_path_chk, self.swath_pkl_list_filter)
+        )
         swath_pkl_list_gb = GroupBox('Swath PKL Sources', swath_pkl_sources_layout, False, False, 'swath_pkl_list_gb')
         
         # Connect show path checkbox signal after it's created
         self.show_swath_pkl_path_chk.toggled.connect(self.toggle_swath_pkl_path_display)
+        self.swath_pkl_list_filter.textChanged.connect(
+            lambda text: self._select_matching_source_files(self.swath_pkl_file_list, text, 'swath_pkl')
+        )
         
         # Connect to file list changes to store original paths
         self.swath_pkl_file_list.itemChanged.connect(self.store_swath_pkl_original_path)
@@ -1171,13 +1188,22 @@ class MainWindow(QtWidgets.QMainWindow):
         # Archive data file list
         self.show_archive_path_chk = CheckBox('Show Path', False, 'show_archive_path_chk',
                                               'Show full file path along with filename in the archive PKL file list')
+        self.archive_list_filter = self._make_source_list_filter(
+            'archive_list_filter',
+            'Select list items whose path or filename contains this text (case insensitive)'
+        )
         archive_sources_layout = QtWidgets.QVBoxLayout()
         archive_sources_layout.addWidget(self.archive_file_list)
-        archive_sources_layout.addWidget(self.show_archive_path_chk)
+        archive_sources_layout.addLayout(
+            self._make_show_path_filter_row(self.show_archive_path_chk, self.archive_list_filter)
+        )
         archive_data_list_gb = GroupBox('Archive PKL Sources', archive_sources_layout, False, False, 'archive_data_list_gb')
         
         # Connect archive show path checkbox after creation
         self.show_archive_path_chk.toggled.connect(self.toggle_archive_path_display)
+        self.archive_list_filter.textChanged.connect(
+            lambda text: self._select_matching_source_files(self.archive_file_list, text, 'archive')
+        )
         
         # Combine archive data components
         archive_data_layout.addWidget(archive_data_list_gb, 1)  # Stretch factor 1 to fill available space
@@ -1248,6 +1274,66 @@ class MainWindow(QtWidgets.QMainWindow):
         # Update Save All Plots button color based on data availability
         self.update_save_plots_button_color()
 
+    def _make_source_list_filter(self, name, tool_tip):
+        """Create an expandable filter field for a source file list tab."""
+        filter_edit = LineEdit('', 0, 20, name, tool_tip)
+        filter_edit.setPlaceholderText('Type to select matching files...')
+        filter_edit.setMinimumWidth(150)
+        filter_edit.setClearButtonEnabled(True)
+        return filter_edit
+
+    def _make_show_path_filter_row(self, show_path_chk, filter_edit):
+        """Build a horizontal row with Show Path checkbox and filter field."""
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(show_path_chk)
+        row.addWidget(QtWidgets.QLabel('Filter:'))
+        row.addWidget(filter_edit, 1)
+        return row
+
+    def _get_source_list_item_path(self, index, item, list_type):
+        """Return the full path associated with a source list item."""
+        if list_type == 'raw':
+            stored_path = item.data(1)
+            return stored_path if stored_path else item.text()
+
+        if list_type == 'swath_pkl':
+            return self.original_swath_pkl_paths.get(index, item.text())
+
+        if list_type == 'archive':
+            if hasattr(self, 'archive_filenames') and index < len(self.archive_filenames):
+                return self.archive_filenames[index]
+            return self.original_archive_paths.get(index, item.text())
+
+        return item.text()
+
+    def _select_matching_source_files(self, list_widget, filter_text, list_type):
+        """Select source list items whose path or filename contains the filter text."""
+        list_widget.clearSelection()
+        filter_text = filter_text.strip().lower()
+        if not filter_text:
+            return
+
+        first_match = None
+        for index in range(list_widget.count()):
+            item = list_widget.item(index)
+            if item is None:
+                continue
+
+            item_path = self._get_source_list_item_path(index, item, list_type)
+            searchable = os.path.normpath(item_path).replace('\\', '/').lower()
+            basename = os.path.basename(item_path).lower()
+            if filter_text in searchable or filter_text in basename:
+                item.setSelected(True)
+                if first_match is None:
+                    first_match = item
+
+        if first_match is not None:
+            list_widget.scrollToItem(first_match)
+
+    def _reapply_raw_file_list_filter(self, *args):
+        if hasattr(self, 'file_list_filter') and self.file_list_filter.text().strip():
+            self._select_matching_source_files(self.file_list, self.file_list_filter.text(), 'raw')
+
     def toggle_file_path_display(self):
         """
         Toggle the display of file paths in the file list based on the show path checkbox.
@@ -1278,6 +1364,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     # Show only filename
                     filename = os.path.basename(current_text)
                     item.setText(filename)
+
+        if self.file_list_filter.text().strip():
+            self._select_matching_source_files(self.file_list, self.file_list_filter.text(), 'raw')
 
     def toggle_swath_pkl_path_display(self):
         """
@@ -1323,6 +1412,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     filename = os.path.basename(original_path)
                     item.setText(filename)
 
+        if self.swath_pkl_list_filter.text().strip():
+            self._select_matching_source_files(
+                self.swath_pkl_file_list, self.swath_pkl_list_filter.text(), 'swath_pkl'
+            )
+
     def toggle_archive_path_display(self):
         """
         Toggle the display of file paths in the Archive PKL file list based on the show path checkbox.
@@ -1352,6 +1446,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     original_path = self.original_archive_paths.get(i, current_text)
                     filename = os.path.basename(original_path)
                     item.setText(filename)
+
+        if self.archive_list_filter.text().strip():
+            self._select_matching_source_files(
+                self.archive_file_list, self.archive_list_filter.text(), 'archive'
+            )
 
     def store_swath_pkl_original_path(self, item):
         """

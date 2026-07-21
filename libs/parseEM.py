@@ -225,13 +225,16 @@ def IP_dg(dg):
 				comma_search = 1		# find comma at end of field
 				comma_idx = str_start + IP_ID_len
 				
-				while comma_search:
+				while comma_search and comma_idx < len(dg) - 4:
 					temp_str = dg[comma_idx:comma_idx+1].decode("utf-8")  # python 3
 
 					if temp_str == ',':
 						comma_search = 0
 					else:
 						comma_idx = comma_idx + 1
+
+				if comma_search:
+					raise ValueError(f'IP datagram missing comma after parameter {IP_ID[i]}')
 			
 				temp_str = dg[str_start + IP_ID_len + 1:comma_idx].decode("utf-8")  # isolate parameter value
 
@@ -274,6 +277,10 @@ def RRA_78_dg(dg):
 	RRA['NUM_VALID_DET'] =	struct.unpack('H', dg[22:24])[0]	# NUM VALID DETECTIONS 2U
 	RRA['SAMPLING_FREQ'] =	struct.unpack('f', dg[24:28])[0]	# SAMPLING FREQ IN Hz 4F
 	RRA['DSCALE'] =			struct.unpack('I', dg[28:32])[0]	# DSCALE Doppler correction see note 5, 4U
+
+	from .parse_guard import validate_tx_sector_count, validate_beam_count
+	validate_tx_sector_count(RRA['NUM_TX_SECTORS'], len(dg))
+	validate_beam_count(RRA['NUM_RX_BEAMS'], len(dg), 32 + 24 * RRA['NUM_TX_SECTORS'], 16)
 
 	# declare TX fields
 	TX_FIELDS = ['TX_TILT', 'TX_FOCUS_RANGE', 'TX_SIG_LEN', 'TX_SEC_DELAY', 'TX_CENTER_FREQ',\
@@ -479,6 +486,9 @@ def XYZ_dg(dg, parse_outermost_only=False, parse_ping_info_only=False):
 	XYZ['F_SAMPLE'] =		struct.unpack('f', dg[28:32])[0]	# 4F SAMPLING FREQUENCY IN Hz
 	XYZ['EM2040_SCAN'] =	struct.unpack('B', dg[32:33])[0]	# 1U SCANNING INFO (EM2040 ONLY)
 	XYZ['SPARE2'] =			struct.unpack('BBB', dg[33:36])[0] 	# 3U SPARE AFTER EM2040 SCANNING BYTE
+
+	from .parse_guard import validate_beam_count
+	validate_beam_count(XYZ['NUM_RX_BEAMS'], len(dg), 36, 20)
 
 	RX_FIELDS = ['RX_DEPTH', 'RX_ACROSS', 'RX_ALONG', 'RX_DET_WIN', 'RX_QUAL_FAC',
 				 'RX_IBA', 'RX_DET_INFO', 'RX_CLEAN', 'RX_BS']

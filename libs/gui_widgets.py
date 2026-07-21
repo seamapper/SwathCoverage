@@ -43,7 +43,19 @@ class LineEdit(QtWidgets.QLineEdit):
     def __init__(self, text='', width=100, height=20, name='NoName', tool_tip=''):
         super(LineEdit, self).__init__()
         self.setText(text)
-        self.setFixedSize(int(width), int(height))
+        if width > 0 and height > 0:
+            self.setFixedSize(int(width), int(height))
+        elif width > 0:
+            self.setFixedWidth(int(width))
+            if height > 0:
+                self.setFixedHeight(int(height))
+        elif height > 0:
+            self.setFixedHeight(int(height))
+            self.setMinimumWidth(120)
+            self.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Expanding,
+                QtWidgets.QSizePolicy.Policy.Fixed,
+            )
         self.setObjectName(name)
         self.setToolTip(tool_tip)
         
