@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.18" 
+__version__ = "2026.19" 
 
 # BSD-3-Clause License
 #
@@ -2669,7 +2669,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
     @staticmethod
-    def _make_panel_scroll_area(layout, min_width=0, min_height=0, vertical_only=False):
+    def _make_panel_scroll_area(layout, min_width=0, min_height=0, vertical_only=False,
+                                reserve_vertical_scrollbar=False):
         """Wrap a layout in a scroll area that scrolls when the viewport is too small."""
         panel = QtWidgets.QWidget()
         panel.setLayout(layout)
@@ -2685,7 +2686,16 @@ class MainWindow(QtWidgets.QMainWindow):
             scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             if min_width > 0:
-                scroll.setFixedWidth(min_width)
+                reserved_width = 0
+                if reserve_vertical_scrollbar:
+                    reserved_width = scroll.style().pixelMetric(
+                        QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent,
+                        None,
+                        scroll,
+                    )
+                    reserved_width += 12  # clearance between scrollbar and right-panel content
+                scroll.setFixedWidth(min_width + reserved_width)
+                scroll._reserved_vertical_scrollbar_width = reserved_width
             if min_height > 0:
                 panel.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed,
                                     QtWidgets.QSizePolicy.Policy.Minimum)
@@ -2711,13 +2721,20 @@ class MainWindow(QtWidgets.QMainWindow):
         center_scroll = self._make_panel_scroll_area(
             self.center_layout, 0, center_min_h, vertical_only=False)
         right_scroll = self._make_panel_scroll_area(
-            self.right_layout, right_min_w, right_min_h, vertical_only=True)
+            self.right_layout, right_min_w, right_min_h, vertical_only=True,
+            reserve_vertical_scrollbar=True)
         main_layout = BoxLayout([left_scroll, center_scroll, right_scroll], 'h')
         main_layout.setStretch(0, 0)
         main_layout.setStretch(1, 1)
         main_layout.setStretch(2, 0)
         self.mainWidget.setLayout(main_layout)
-        self.resize(*self.WINDOW_DEFAULT)
+        right_scrollbar_reserve = getattr(
+            right_scroll, '_reserved_vertical_scrollbar_width', 0)
+        self.setMinimumWidth(self.WINDOW_MIN[0] + right_scrollbar_reserve)
+        self.resize(
+            self.WINDOW_DEFAULT[0] + right_scrollbar_reserve,
+            self.WINDOW_DEFAULT[1],
+        )
 
 
     def _handle_calc_trend_clicked(self):
