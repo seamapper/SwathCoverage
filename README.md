@@ -4,6 +4,8 @@
 
 A comprehensive toolkit for analyzing swath coverage data from Kongsberg multibeam systems (and optionally GSF via [mbtoolkit](https://github.com/oceanmapping/mbtoolkit)). This project provides two main applications for processing, converting, and visualizing swath coverage data.
 
+KMALL file reading is based on code from Val Schmidt, available at (https://github.com/valschmidt/kmall).
+
 **Center for Coastal and Ocean Mapping (CCOM) / Joint Hydrographic Center (JHC), University of New Hampshire**
 
 ## Overview
@@ -334,7 +336,7 @@ For **GSF support in the plotter executable**, place `mbtoolkit/` or `mbtoolkit_
 ## Supported File Formats
 
 ### Input Formats
-- **KMALL** (.kmall): Kongsberg's modern multibeam format
+- **KMALL** (.kmall): Kongsberg's modern multibeam format. KMALL reading is based on code from Val Schmidt ([valschmidt/kmall](https://github.com/valschmidt/kmall)).
 - **ALL** (.all): Kongsberg's legacy format
 - **GSF** (.gsf): Generic Sensor Format — coverage-only import (depth, swath width, and backscatter). Requires [mbtoolkit](https://github.com/oceanmapping/mbtoolkit); see [GSF Support](#gsf-support).
 
@@ -523,6 +525,8 @@ This project is licensed under the BSD-3-Clause License - see the [LICENSE](LICE
 ## Acknowledgments
 
 Developed at the Center for Coastal and Ocean Mapping (CCOM) / Joint Hydrographic Center (JHC), University of New Hampshire.
+
+KMALL support is based on code from Val Schmidt, available at ([valschmidt/kmall](https://github.com/valschmidt/kmall)).
 
 GSF support uses the Multibeam Community Toolkit ([mbtoolkit](https://github.com/oceanmapping/mbtoolkit)).
 
