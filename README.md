@@ -2,7 +2,7 @@
 
 ![Example Plot](media/Swath_Coverage.jpg)
 
-A comprehensive toolkit for analyzing swath coverage data from Kongsberg multibeam systems. This project provides two main applications for processing, converting, and visualizing swath coverage data.
+A comprehensive toolkit for analyzing swath coverage data from Kongsberg multibeam systems (and optionally GSF via [mbtoolkit](https://github.com/oceanmapping/mbtoolkit)). This project provides two main applications for processing, converting, and visualizing swath coverage data.
 
 **Center for Coastal and Ocean Mapping (CCOM) / Joint Hydrographic Center (JHC), University of New Hampshire**
 
@@ -70,10 +70,11 @@ See also [KMALL_TO_PKL_README.md](KMALL_TO_PKL_README.md) for converter-specific
 A comprehensive GUI application for analyzing and visualizing multibeam echosounder data with extensive plotting and analysis capabilities. The resizable window opens at **1640 × 1100 px** and uses a dark Fusion theme. Its minimum size is **890 × 480 px**.
 
 #### Key Features
-- **Multiple Data Sources**: Load raw KMALL/ALL files, Swath PKL files, or archived data
+- **Multiple Data Sources**: Load raw KMALL/ALL files (and **GSF** when mbtoolkit is installed), Swath PKL files, or archived data
   - Add Directory with optional **Include Subdirectories** for Raw, Swath PKL, and Archive PKL
   - **Show Path** toggle and a text filter for each source list; typing a partial filename or path selects matching files for **Remove Selected**
   - Separate **Convert to Swath PKL** and **Convert to Archive PKL** groupboxes on the Raw tab
+- **Optional GSF Import**: Coverage-only `.gsf` support (depth, swath width, backscatter) via [mbtoolkit](https://github.com/oceanmapping/mbtoolkit); Depth Mode / Pulse Form / Frequency plots are blank for GSF-only sessions and omitted from Export Analysis
 - **Fast KMALL Processing**: Optional `.swathcov.idx` index sidecars, single-pass extraction, and plot-mode outermost-sounding reads
 - **Corrupt-File Protection**: Bounded resynchronization, datagram-size/count validation, cancellation, and per-file parsing timeouts prevent malformed ALL/KMALL files from hanging the application
 - **Extract Timing** (optional): Parse SKM datagrams and show the Timing plot tab when enabled during coverage calculation
@@ -105,27 +106,27 @@ python swath_coverage_plotter.py
 
 **Method 2: Windows Executable**
 ```
-Swath_Coverage_Plotter_v2026.12.exe
+Swath_Coverage_Plotter_v2026.20.exe
 ```
 Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 
 **Basic Workflow:**
 1. Launch the application
 2. Load data using one of the following methods:
-   - **Raw tab**: Add KMALL/ALL files, optionally enable **Save Index** and **Extract Timing**, then click **Calculate Coverage**
+   - **Raw tab**: Add KMALL/ALL files (and **GSF** if mbtoolkit is available — see [GSF Support](#gsf-support)), optionally enable **Save Index** and **Extract Timing**, then click **Calculate Coverage**
    - **Swath PKL tab**: Load pre-converted PKL files (faster loading)
    - **Archive PKL tab**: Load previously archived data for comparison
-3. Optional fast parameter scan (Raw tab only): click **Scan Parameters Only** after adding raw files
+3. Optional fast parameter scan (Raw tab only): click **Scan Parameters Only** after adding Kongsberg raw files (not applicable to GSF)
 4. Optional PKL conversion (Raw tab):
-   - **Convert to Swath PKL**: batch-convert raw files to compressed Swath PKL files
+   - **Convert to Swath PKL**: batch-convert Kongsberg raw files to compressed Swath PKL files
    - **Convert to Archive PKL**: create an archive PKL; auto-calculates coverage first if needed
 5. Optional archive from loaded Swath PKL:
    - **Swath PKL tab → Convert to Archive PKL** converts loaded Swath PKL data to a single archive (prompts for parent directory and archive basename)
 6. Configure plot settings on the **Plot** tab (colors, limits, point style, etc.)
 7. Apply filters on the **Filter** tab as needed (edit values first, then enable filters; press **Enter** in each field to commit)
-8. Explore plots across the center-panel tabs (some tabs are hidden depending on data source; see GUI Layout)
+8. Explore plots across the center-panel tabs (some tabs are hidden or blank depending on data source; see GUI Layout)
 9. Use the **Trend** tab to calculate or digitize a coverage trend and export it
-10. Use the **Search** tab to find parameter changes; results appear in the **Parameters** plot tab table when raw files are loaded
+10. Use the **Search** tab to find parameter changes; results appear in the **Parameters** plot tab table when raw Kongsberg files are loaded
 
 ---
 
@@ -133,7 +134,7 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 
 ### Left Panel — Sources & Log
 - **Sources** groupbox (tabbed):
-  - *Raw*: **Raw Swath Sources** (file list, **Show Path**, partial-text selection filter, Add Files / Add Directory, **Include Subdirectories**, Remove Selected / Remove All Files, **Scan Parameters Only**); **Swath Coverage Calculation** (**Calculate Coverage** with **Save Index** and **Extract Timing**); **Convert to Swath PKL** (with **Enable compression**); **Convert to Archive PKL** (with **Enable compression**)
+  - *Raw*: **Raw Swath Sources** (file list, **Show Path**, partial-text selection filter, Add Files / Add Directory, **Include Subdirectories**, Remove Selected / Remove All Files, **Scan Parameters Only**); **Swath Coverage Calculation** (**Calculate Coverage** with **Save Index** and **Extract Timing**); **Convert to Swath PKL** (with **Enable compression**); **Convert to Archive PKL** (with **Enable compression**). When mbtoolkit is present, Add Files / Add Directory also accept `.gsf`; otherwise GSF is omitted from the dialogs and skipped if selected.
   - *Swath PKL*: file list with **Show Path** and partial-text selection filter; Swath PKL Management (Add/Remove/Clear/Add Directory, Convert to Archive PKL, Include Subdirectories)
   - *Archive PKL*: file list with **Show Path** and partial-text selection filter; Archive PKL Management
   - *Spec Curve*: specification curve files
@@ -151,17 +152,19 @@ Long-running operations (**Calculate Coverage**, **Scan Parameters Only**, **Con
 |---|---|---|
 | Depth | Main swath coverage scatter plot, colored by depth | Always |
 | Backscatter | Backscatter intensity scatter plot | Always |
-| Depth Mode | Depth mode over time | Always |
-| Pulse Form | CW vs. FM pulse form over time | Always |
+| Depth Mode | Depth mode over time | Always (blank with an on-plot notice for **GSF-only** sessions) |
+| Pulse Form | CW vs. FM pulse form over time | Always (blank with an on-plot notice for **GSF-only** sessions) |
 | Swath Mode | Single vs. Dual swath over time | Always |
-| Frequency | Operating frequency over time | Always |
+| Frequency | Operating frequency over time | Always (blank with an on-plot notice for **GSF-only** sessions) |
 | Data Rate | Data acquisition rate over time | Always |
-| Timing | Ping interval / timing analysis | Only when **Extract Timing** is enabled during raw-file coverage calculation |
+| Timing | Ping interval / timing analysis | Only when **Extract Timing** is enabled during raw Kongsberg coverage calculation |
 | Parameters | Search controls + runtime parameter change table | Only when raw KMALL/ALL files are loaded in **Raw Swath Sources** |
 
 The **Parameters** tab combines search controls and the acquisition parameter table. Use **Search Parameters** to filter by depth mode, swath mode, pulse form, angles, coverage, frequency, and installation parameters, then click **Update Search**. Rows are in chronological order; cells that changed from the previous row are highlighted; the first row is never highlighted. **Save Search Log** exports the table as CSV (or plain text with a CSV body). Export Analysis also writes `acquisition_log.csv` from this table.
 
 When only Swath PKL or Archive PKL data are loaded, the **Data Rate** and **Timing** plots display an on-plot notice that those metrics are not calculated from PKL/archive sources.
+
+When only GSF data are plotted, **Depth Mode**, **Pulse Form**, and **Frequency** show *“This plot type is not supported with GSF files.”* **Export Analysis** skips those three images for GSF-only sessions.
 
 ### Right Panel — Controls (3 tabs, 300 px wide)
 
@@ -245,6 +248,7 @@ Custom plot **depth** and **swath width** boxes are filled from the data extent 
 #### Optional Dependencies
 - pyproj (coordinate transformations)
 - utm (UTM coordinate conversions)
+- [mbtoolkit](https://github.com/oceanmapping/mbtoolkit) — required for **GSF** (`.gsf`) coverage import (see [GSF Support](#gsf-support))
 
 #### Installation Steps
 
@@ -259,7 +263,13 @@ Custom plot **depth** and **swath width** boxes are filled from the data extent 
    pip install PyQt6 numpy scipy matplotlib
    ```
 
-3. **Verify directory structure**
+3. **(Optional) Install mbtoolkit for GSF support**
+   ```bash
+   git clone https://github.com/oceanmapping/mbtoolkit.git mbtoolkit
+   ```
+   Or download from https://github.com/oceanmapping/mbtoolkit and place the folder as `mbtoolkit/` or `mbtoolkit_gsf/` next to `swath_coverage_plotter.py` so that `readers/base/pygsf.py` exists. At startup the plotter logs whether GSF support is enabled.
+
+4. **Verify directory structure**
    ```
    SwathCoverage/
    ├── libs/
@@ -268,14 +278,30 @@ Custom plot **depth** and **swath width** boxes are filled from the data extent 
    │   ├── kmall.py
    │   ├── parseEM.py
    │   ├── file_fun.py
-   │   └── gui_widgets.py
+   │   ├── gui_widgets.py
+   │   └── parse_guard.py
    ├── media/
    │   └── mac.ico
+   ├── mbtoolkit/                  # optional — or mbtoolkit_gsf/
+   │   └── readers/base/pygsf.py
    ├── kmall_to_pkl_converter.py
    ├── swath_coverage_plotter.py
    ├── SwathCoveragePlotter.spec
    └── KMALL_to_PKL_Converter.spec
    ```
+
+### GSF Support
+
+Coverage-only GSF import uses the pure-Python GSF reader from [mbtoolkit](https://github.com/oceanmapping/mbtoolkit) (Multibeam Community Toolkit).
+
+| Item | Behavior |
+|---|---|
+| **Requirement** | `mbtoolkit/` or `mbtoolkit_gsf/` with `readers/base/pygsf.py` next to the project (or bundled in the exe) |
+| **What is imported** | Outermost valid beams: depth, across-track width, backscatter (BS), beam angles |
+| **What is not available** | Kongsberg runtime/install modes → Depth Mode, Pulse Form, and Frequency plots; Scan Parameters; Convert to Swath/Archive PKL from GSF |
+| **If mbtoolkit is missing** | Add Files / Add Directory omit `*.gsf`; any `.gsf` paths are skipped with a log message pointing to the mbtoolkit repo |
+| **GSF-only plots** | Depth Mode / Pulse Form / Frequency show an on-plot notice; **Export Analysis** does not write those PNGs |
+| **Executable builds** | `SwathCoveragePlotter.spec` bundles `mbtoolkit` / `mbtoolkit_gsf` automatically when present at build time |
 
 ### Building Executables (Optional)
 
@@ -299,7 +325,9 @@ build_swath_coverage_exe.bat
 build_kmall_exe.bat
 ```
 
-Output is placed in the `dist/` folder, named with the current version (e.g., `Swath_Coverage_Plotter_v2026.12.exe`, `KMALL_to_SwathPKL_Converter_v2026.06.exe`).
+Output is placed in the `dist/` folder, named with the current version (e.g., `Swath_Coverage_Plotter_v2026.20.exe`, `KMALL_to_SwathPKL_Converter_v2026.06.exe`).
+
+For **GSF support in the plotter executable**, place `mbtoolkit/` or `mbtoolkit_gsf/` (with `readers/base/pygsf.py`) next to `SwathCoveragePlotter.spec` before building. The build log reports whether mbtoolkit was included. Without it, the exe still builds but disables `.gsf` handling at runtime.
 
 ---
 
@@ -308,6 +336,7 @@ Output is placed in the `dist/` folder, named with the current version (e.g., `S
 ### Input Formats
 - **KMALL** (.kmall): Kongsberg's modern multibeam format
 - **ALL** (.all): Kongsberg's legacy format
+- **GSF** (.gsf): Generic Sensor Format — coverage-only import (depth, swath width, and backscatter). Requires [mbtoolkit](https://github.com/oceanmapping/mbtoolkit); see [GSF Support](#gsf-support).
 
 ### Output / Intermediate Formats
 - **PKL** (.pkl): Optimized pickle format for fast loading
@@ -324,18 +353,20 @@ The toolkit supports Kongsberg EM series multibeam systems:
 - EM 710 / EM 712
 - EM 122 / EM 124
 
+GSF files from other sonar vendors can be imported for coverage (depth / width / BS) when mbtoolkit is available; Kongsberg-specific mode and parameter plots remain NA for those files.
+
 ---
 
 ## Plot Types
 
 1. **Depth**: Swath coverage scatter plot, colored by depth (shallow = red, deep = blue)
 2. **Backscatter**: Acoustic backscatter amplitude visualization
-3. **Depth Mode**: Depth mode over time (Very Shallow, Shallow, Medium, Deep, etc.)
-4. **Pulse Form**: Continuous Wave (CW) vs. Frequency Modulated (FM) pulse forms
+3. **Depth Mode**: Depth mode over time (Very Shallow, Shallow, Medium, Deep, etc.) — not supported for GSF-only sessions
+4. **Pulse Form**: Continuous Wave (CW) vs. Frequency Modulated (FM) pulse forms — not supported for GSF-only sessions
 5. **Swath Mode**: Single vs. Dual swath operation
-6. **Frequency**: Operating frequency over time
+6. **Frequency**: Operating frequency over time — not supported for GSF-only sessions
 7. **Data Rate**: Data acquisition rate over time
-8. **Timing**: Ping interval and timing analysis (shown only when **Extract Timing** is enabled for raw-file processing)
+8. **Timing**: Ping interval and timing analysis (shown only when **Extract Timing** is enabled for raw Kongsberg processing)
 9. **Parameters**: Runtime parameter change table with highlighted diffs (shown only when raw KMALL/ALL files are loaded)
 
 ---
@@ -428,6 +459,15 @@ During **Calculate Coverage** or **Scan Parameters Only**, the reader can write 
    - The Parameters plot tab appears only when raw `.all` / `.kmall` files are listed under **Raw Swath Sources**
    - Use the **Search** tab to populate the Parameters table after raw data have been processed
 
+11. **GSF files are missing from Add Files / Add Directory**
+   - Install [mbtoolkit](https://github.com/oceanmapping/mbtoolkit) as `mbtoolkit/` or `mbtoolkit_gsf/` next to the project so `readers/base/pygsf.py` is present
+   - Restart the plotter; the Activity Log should report that GSF support is enabled
+   - For a rebuilt Windows exe, mbtoolkit must be present at **build** time so `SwathCoveragePlotter.spec` can bundle it
+
+12. **Depth Mode / Pulse Form / Frequency blank for GSF**
+   - Expected for GSF-only sessions (those plots need Kongsberg mode/frequency metadata)
+   - **Export Analysis** skips those three PNGs when only GSF data are plotted
+
 ### Getting Help
 
 1. Check the **Activity Log** in the left panel for detailed error messages
@@ -440,6 +480,7 @@ During **Calculate Coverage** or **Scan Parameters Only**, the reader can write 
 ## Version History
 
 ### Swath Coverage Plotter
+- **v2026.20**: Optional **GSF** (`.gsf`) coverage-only import via [mbtoolkit](https://github.com/oceanmapping/mbtoolkit) (depth / width / BS); automatic mbtoolkit detection (UI and parsing skip GSF when absent); GSF-only Depth Mode / Pulse Form / Frequency plots show an unsupported notice and are omitted from Export Analysis; `SwathCoveragePlotter.spec` bundles mbtoolkit when present at build time
 - **v2026.12**: Raw tab UI reorganized (**Swath Coverage Calculation**, **Convert to Swath PKL**, **Convert to Archive PKL** groupboxes); **Scan Parameters Only**; **Include Subdirectories**; optional **Save Index** and **Extract Timing**; responsive background raw parsing with cancellable current-file progress; malformed ALL/KMALL hang guards; partial-text selection filters for Raw, Swath PKL, and Archive PKL source lists; depth/width filters kept independent from custom plot limits; **Parameters** tab table with change highlighting (hidden for Swath/Archive PKL-only loads); **Timing** tab hidden unless Extract Timing is enabled; fast KMALL index cache and plot-mode reads; PKL conversion aligned with coverage-only outermost-sounding pipeline
 - **v2026.11**: Enter-to-commit parameter fields with amber draft borders; filter/limit fields editable when groupboxes are off (inactive styling); custom plot depth/width limits auto-fill from data; Export Analysis remembers parent directory and save name between exports and sessions; single plot refresh after export; width filter included in debounced refresh; README and UI workflow documentation updates
 - **v2026.09**: Added Analysis & Plot Management workflow (Export Analysis / Import Analysis Group), full source-file path export in settings/JSON, expanded Plot tab state persistence on import/export (including swath-angle lines, water-depth-multiple lines, Other options, and single-color selections), and multiple plot layout/title refinements for GUI + export consistency
@@ -482,6 +523,8 @@ This project is licensed under the BSD-3-Clause License - see the [LICENSE](LICE
 ## Acknowledgments
 
 Developed at the Center for Coastal and Ocean Mapping (CCOM) / Joint Hydrographic Center (JHC), University of New Hampshire.
+
+GSF support uses the Multibeam Community Toolkit ([mbtoolkit](https://github.com/oceanmapping/mbtoolkit)).
 
 ## Citation
 

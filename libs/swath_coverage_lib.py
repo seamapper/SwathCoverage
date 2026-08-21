@@ -46,7 +46,9 @@ from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
 
 from . import parseEM
 from .file_fun import *
-from .swath_fun import readALLswath, readKMALLswath, interpretMode, adjust_depth_ref, remove_kmall_index_cache
+from .swath_fun import (readALLswath, readKMALLswath, readGSFswath, interpretMode,
+                        adjust_depth_ref, remove_kmall_index_cache, gsf_support_available,
+                        mbtoolkit_gsf_missing_message)
 from .parse_guard import reset_cancel, request_cancel, ParseGuardError, is_cancelled, begin_file_parse
 
 import matplotlib.pyplot as plt
@@ -337,6 +339,10 @@ def setup(self):
     # Add startup message about point decimation being enabled by default
     if hasattr(self, 'update_log'):
         self.update_log("✓ Point decimation is enabled by default (max 50,000 points per dataset) to maintain plotting performance", 'blue')
+        if gsf_support_available():
+            self.update_log('✓ GSF support enabled (mbtoolkit GSF reader found)', 'blue')
+        else:
+            self.update_log(mbtoolkit_gsf_missing_message())
 
 def update_button_states(self):
     """Update the enabled/disabled state of buttons based on whether files are loaded"""
@@ -346,15 +352,18 @@ def update_button_states(self):
                  len(self.det) > 0 or 
                  len(self.det_archive) > 0)
     
-    # Check if there are new data files (.all, .kmall) that haven't been processed yet
+    # Check if there are new data files (.all, .kmall, .gsf) that haven't been processed yet
     # Only count files that need processing, not archive files (.pkl)
     has_new_data_files = False
     has_source_files = False
+    kong_files = []
     if len(self.filenames) > 0 and self.filenames[0] != '':
-        # Check if there are any .all or .kmall files that need processing
+        # Check if there are any .all / .kmall / .gsf files that need processing
         # Filter out empty strings and check for valid file extensions
-        data_files = [f for f in self.filenames if f and f.strip() and f.endswith(('.all', '.kmall'))]
+        data_files = [f for f in self.filenames if f and f.strip() and
+                      f.lower().endswith(tuple(raw_swath_extensions()))]
         has_source_files = len(data_files) > 0
+        kong_files = [f for f in self.filenames if f and f.strip() and f.lower().endswith(('.all', '.kmall'))]
         
         # Check if there are new data files that haven't been processed yet
         # A file is considered "new" if it's not in the processed lists
@@ -389,7 +398,8 @@ def update_button_states(self):
             self.calc_coverage_btn.setStyleSheet("")
             
     if hasattr(self, 'scan_params_btn'):
-        self.scan_params_btn.setEnabled(has_files)
+        # Scan Parameters is Kongsberg runtime/install only (.gsf has no useful params)
+        self.scan_params_btn.setEnabled(len(kong_files) > 0)
     
     if hasattr(self, 'archive_data_btn'):
         # Allow archive button when source files are loaded OR coverage already exists.
@@ -541,6 +551,38 @@ def init_time_ax(self):  # set initial timing plot parameters
 # def init_param_ax(self):  # set initial runtime parameter tracking plot
     # self.param_ax1 = self.param_figure.add_subplot(111, label='1')
 
+def raw_swath_file_dialog_filter():
+    """QFileDialog filter string for raw swath sources (includes GSF only if mbtoolkit is present)."""
+    if gsf_support_available():
+        return 'Kongsberg / GSF (*.all *.kmall *.gsf)'
+    return 'Kongsberg (*.all *.kmall)'
+
+
+def raw_swath_extensions():
+    """Accepted raw swath extensions (includes .gsf only if mbtoolkit is present)."""
+    if gsf_support_available():
+        return ['.all', '.kmall', '.gsf']
+    return ['.all', '.kmall']
+
+
+def filter_unsupported_gsf_files(self, fnames):
+    """Drop .gsf paths when mbtoolkit is unavailable; log why."""
+    if not fnames:
+        return fnames
+    if gsf_support_available():
+        return fnames
+    kept = []
+    skipped = []
+    for fn in fnames:
+        if isinstance(fn, str) and fn.lower().endswith('.gsf'):
+            skipped.append(fn)
+        else:
+            kept.append(fn)
+    if skipped:
+        update_log(self, f'Skipping {len(skipped)} .gsf file(s): {mbtoolkit_gsf_missing_message()}')
+    return kept
+
+
 def add_cov_files(self, ftype_filter, input_dir='HOME', include_subdir=False, ):
     # add files with extensions in ftype_filter from input_dir and subdir if desired
     if hasattr(self, 'start_operation_log'):
@@ -560,6 +602,7 @@ def add_cov_files(self, ftype_filter, input_dir='HOME', include_subdir=False, ):
             print(f"Warning: Could not update session config: {e}")
     
     fnames = add_files(self, ftype_filter, input_dir, include_subdir)
+    fnames = filter_unsupported_gsf_files(self, fnames)
     
     if fnames:
         if hasattr(self, 'log_success'):
@@ -703,6 +746,72 @@ def has_raw_swath_sources(self):
     )
 
 
+def _fname_is_gsf(fname):
+    return isinstance(fname, str) and fname.lower().endswith('.gsf')
+
+
+def det_sources_are_gsf_only(det):
+    """True when a detection dict has sounding filenames and all are .gsf."""
+    if not isinstance(det, dict):
+        return False
+    fnames = det.get('fname') or []
+    if not fnames:
+        models = det.get('model') or []
+        return bool(models) and all(str(m) == 'GSF' for m in models)
+    return all(_fname_is_gsf(f) for f in fnames)
+
+
+def plotted_coverage_is_gsf_only(self):
+    """True when every currently-plotted coverage source is GSF (new and/or archive)."""
+    fnames = []
+    models = []
+
+    show_new = getattr(self, 'show_data_chk', None) and self.show_data_chk.isChecked()
+    show_arc = getattr(self, 'show_data_chk_arc', None) and self.show_data_chk_arc.isChecked()
+
+    if show_new and isinstance(getattr(self, 'det', None), dict):
+        fnames.extend(self.det.get('fname') or [])
+        models.extend(self.det.get('model') or [])
+
+    if show_arc and isinstance(getattr(self, 'det_archive', None), dict):
+        for det in self.det_archive.values():
+            if isinstance(det, dict):
+                fnames.extend(det.get('fname') or [])
+                models.extend(det.get('model') or [])
+
+    if fnames:
+        return all(_fname_is_gsf(f) for f in fnames)
+    if models:
+        return all(str(m) == 'GSF' for m in models)
+    return False
+
+
+_GSF_UNSUPPORTED_PLOT_MSG = 'This plot type is not supported with GSF files.'
+
+
+def show_gsf_unsupported_mode_plots(self):
+    """Blank Depth Mode / Pulse Form / Frequency axes with an unsupported message."""
+    plot_axes = []
+    if hasattr(self, 'pingmode_ax'):
+        plot_axes.append((self.pingmode_ax, getattr(self, 'title_str_pingmode', 'Depth Mode')))
+    if hasattr(self, 'pulseform_ax'):
+        plot_axes.append((self.pulseform_ax, getattr(self, 'title_str_pulseform', 'Pulse Form')))
+    if hasattr(self, 'frequency_ax'):
+        plot_axes.append((self.frequency_ax, getattr(self, 'title_str_frequency', 'Frequency')))
+
+    for ax, _title in plot_axes:
+        ax.clear()
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_visible(True)
+        ax.text(0.5, 0.5, _GSF_UNSUPPORTED_PLOT_MSG,
+                transform=ax.transAxes, ha='center', va='center',
+                fontsize=12, wrap=True)
+
+    self._gsf_mode_plots_unsupported = True
+
+
 def update_parameters_tab_visibility(self):
     """Show Parameters tab only when raw swath source files are loaded."""
     if not hasattr(self, 'plot_tabs') or not hasattr(self, 'parameters_tab_index'):
@@ -832,6 +941,7 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
             sender = 'NA'
 
     clear_plot(self)
+    self._gsf_mode_plots_unsupported = False
 
     # Clear trend scatter artists so we don't accumulate multiple trend plots per refresh
     if hasattr(self, 'trend_artists'):
@@ -856,6 +966,8 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
                 self.pi_max_custom = 0.0
     except Exception:
         pass
+
+    gsf_only = plotted_coverage_is_gsf_only(self)
 
     # Always sync top-data selection with current show-data toggles.
     # Restricting this to specific sender names can miss updates when sender metadata differs,
@@ -902,18 +1014,19 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
             # DEBUG: failed to plot backscatter
             pass
         
-        # plot ping mode data
-        try:
-            plot_pingmode(self, self.det, is_archive=False)
-        except:
-            # DEBUG: failed to plot ping mode
-            pass
-        # plot pulse form data
-        try:
-            plot_pulseform(self, self.det, is_archive=False)
-        except:
-            # DEBUG: failed to plot pulse form
-            pass
+        if not gsf_only:
+            # plot ping mode data
+            try:
+                plot_pingmode(self, self.det, is_archive=False)
+            except:
+                # DEBUG: failed to plot ping mode
+                pass
+            # plot pulse form data
+            try:
+                plot_pulseform(self, self.det, is_archive=False)
+            except:
+                # DEBUG: failed to plot pulse form
+                pass
         # plot swath mode data
         try:
             plot_swathmode(self, self.det, is_archive=False)
@@ -921,12 +1034,13 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
             # DEBUG: failed to plot swath mode
             pass
 
-        # plot frequency data
-        try:
-            plot_frequency(self, self.det, is_archive=False)
-        except:
-            # DEBUG: failed to plot frequency
-            pass
+        if not gsf_only:
+            # plot frequency data
+            try:
+                plot_frequency(self, self.det, is_archive=False)
+            except:
+                # DEBUG: failed to plot frequency
+                pass
 
         # print('calling plot_data_rate')
         try:
@@ -959,18 +1073,19 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
             # DEBUG: failed to plot archive backscatter
             pass
         
-        # plot archive ping mode data
-        try:
-            plot_pingmode(self, self.det_archive, is_archive=True)
-        except:
-            # DEBUG: failed to plot archive ping mode
-            pass
-        # plot archive pulse form data
-        try:
-            plot_pulseform(self, self.det_archive, is_archive=True)
-        except:
-            # DEBUG: failed to plot archive pulse form
-            pass
+        if not gsf_only:
+            # plot archive ping mode data
+            try:
+                plot_pingmode(self, self.det_archive, is_archive=True)
+            except:
+                # DEBUG: failed to plot archive ping mode
+                pass
+            # plot archive pulse form data
+            try:
+                plot_pulseform(self, self.det_archive, is_archive=True)
+            except:
+                # DEBUG: failed to plot archive pulse form
+                pass
         # plot archive swath mode data
         try:
             plot_swathmode(self, self.det_archive, is_archive=True)
@@ -978,12 +1093,13 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
             # DEBUG: failed to plot archive swath mode
             pass
 
-        # plot archive frequency data
-        try:
-            plot_frequency(self, self.det_archive, is_archive=True)
-        except:
-            # DEBUG: failed to plot archive frequency
-            pass
+        if not gsf_only:
+            # plot archive frequency data
+            try:
+                plot_frequency(self, self.det_archive, is_archive=True)
+            except:
+                # DEBUG: failed to plot archive frequency
+                pass
 
     plot_hist(self)  # plot histogram of soundings versus depth
     update_axes(self)  # update axes to fit all loaded data
@@ -992,6 +1108,10 @@ def _refresh_plot_impl(self, print_time=True, call_source=None, sender=None, val
     # REMOVED: add_nominal_angle_lines(self) - now handled by add_plot_features() for all plots
     add_legend(self)  # add legend or colorbar
     add_spec_lines(self)  # add specification lines if loaded
+
+    # GSF has no Depth Mode / Pulse Form / Frequency metadata — leave those plots blank
+    if gsf_only or plotted_coverage_is_gsf_only(self):
+        show_gsf_unsupported_mode_plots(self)
     if self.verbose_logging:
         print('calling self.swath_canvas.draw()')
     self.swath_canvas.draw()  # final update for the swath canvas
@@ -2017,7 +2137,7 @@ def _run_coverage_file_parse(host, fnames_new, params_only, progress_callback=No
 
     for f in range(num_new_files):
         fname_str = fnames_new[f].rsplit('/')[-1]
-        ftype = fname_str.rsplit('.', 1)[-1]
+        ftype = fname_str.rsplit('.', 1)[-1].lower()
         if emit_progress(f, f'Current file [{f + 1}/{num_new_files}]: {fname_str}'):
             emit_log('Processing cancelled by user.')
             break
@@ -2096,6 +2216,23 @@ def _run_coverage_file_parse(host, fnames_new, params_only, progress_callback=No
                 skm_time[i] = {'fname': fnames_new[f],
                                'SKM_header_datetime': SKM_header_datetime,
                                'SKM_sample_datetime': SKM_sample_datetime}
+            elif ftype == 'gsf':
+                if not gsf_support_available():
+                    emit_log(f"Skipping .gsf file (mbtoolkit not available): {fname_str}")
+                    emit_log(mbtoolkit_gsf_missing_message())
+                    emit_progress(f + 1)
+                    continue
+                emit_log(f"Parsing .gsf file (coverage: depth/width/BS): {fname_str}")
+                gsf_start_time = process_time()
+                data_new[i] = readGSFswath(host, fnames_new[f], print_updates=host.print_updates,
+                                           parse_params_only=params_only)
+                gsf_processing_time = process_time() - gsf_start_time
+                file_size_mb = os.path.getsize(fnames_new[f]) / (1024 * 1024)
+                n_pings = len(data_new[i].get('XYZ', {}))
+                emit_log(
+                    f"GSF coverage parse: {fname_str} ({file_size_mb:.1f} MB, {n_pings} pings) "
+                    f"completed in {gsf_processing_time:.2f}s"
+                )
             else:
                 emit_log(f"Warning: Skipping unrecognized file type for {fname_str}")
                 emit_progress(f + 1)
@@ -2238,12 +2375,12 @@ def calc_coverage(self, params_only=False):
     # fnames_new = get_new_file_list(self, ['.all', '.kmall'], fnames_det)  # list new .all files not in det dict
 
     # find files that were SCANNED (and have zeros) but were not PLOTTED (real data), then remove these from det dict
-    if params_only:  # scanning only: find unscanned/unplotted files (calc cov adds fname to fnames_scanned_params)
+    if params_only:  # scanning only: Kongsberg runtime/install params (.gsf has none)
         fnames_new = get_new_file_list(self, ['.all', '.kmall'], self.fnames_scanned_params)
         # print('params_only is TRUE, fnames_new = ', fnames_new)
 
     else:  # plotting full coverage: find unplotted files (and/or delete zeros in det dict if only scanned previously)
-        fnames_new = get_new_file_list(self, ['.all', '.kmall'], self.fnames_plotted_cov)
+        fnames_new = get_new_file_list(self, raw_swath_extensions(), self.fnames_plotted_cov)
         # print('params_only is FALSE, fnames_new = ', fnames_new)
         print('self.fnames_scanned_params =', self.fnames_scanned_params)
         fnames_del = [f.rsplit('/', 1)[-1] for f in fnames_new if f.rsplit('/', 1)[-1] in self.fnames_scanned_params]
@@ -2256,7 +2393,8 @@ def calc_coverage(self, params_only=False):
 
     # if num_new_files == 0:
     if num_new_files == 0 and not self.param_scanned:
-        update_log(self, 'No new .all or .kmall file(s) added.  Please add new file(s) and calculate coverage.')
+        exts = ', '.join(raw_swath_extensions())
+        update_log(self, f'No new file(s) with extensions {exts} added.  Please add new file(s) and calculate coverage.')
         if hasattr(self, 'end_operation_log'):
             self.end_operation_log(operation_name, "No new files to process")
 
@@ -2353,15 +2491,17 @@ def sortDetectionsCoverage(self, data, print_updates=False, params_only=False):
         if print_updates:
             print('Finding outermost valid soundings in file', data[f]['fname'])
 
-        # set up keys for dict fields of interest from parsers for each file type (.all or .kmall)
-        ftype = data[f]['fname'].rsplit('.', 1)[1]
+        # set up keys for dict fields of interest from parsers for each file type (.all, .kmall, .gsf)
+        ftype = data[f]['fname'].rsplit('.', 1)[1].lower()
+        # GSF coverage import uses ALL-style XYZ keys (depth/across/BS/flags)
         key_idx = int(ftype == 'kmall')  # keys in data dicts depend on parser used, get index to select keys below
-        det_int_threshold = [127, 0][key_idx]  # threshold for valid sounding (.all  <128 and .kmall == 0)
+        det_int_threshold = [127, 0][key_idx]  # threshold for valid sounding (.all/.gsf <128 and .kmall == 0)
         det_int_key = ['RX_DET_INFO', 'detectionType'][key_idx]  # key for detect info depends on ftype
         depth_key = ['RX_DEPTH', 'z_reRefPoint_m'][key_idx]  # key for depth
         across_key = ['RX_ACROSS', 'y_reRefPoint_m'][key_idx]  # key for acrosstrack distance
         bs_key = ['RX_BS', 'reflectivity1_dB'][key_idx]  # key for backscatter in dB
-        bs_scale = [0.1, 1][key_idx]  # backscatter scale in X dB; multiply parsed value by this factor for dB
+        # GSF amplitudes are already in dB; .all RX_BS is 0.1 dB units
+        bs_scale = [1 if ftype == 'gsf' else 0.1, 1][key_idx]
         # bs_key = ['RS_BS', 'reflectivity2_dB'][key_idx]  # key for backscatter in dB TESTING KMALL REFLECTIVITY 2
         angle_key = ['RX_ANGLE', 'beamAngleReRx_deg'][key_idx]  # key for RX angle re RX array
 
@@ -2467,6 +2607,31 @@ def sortDetectionsCoverage(self, data, print_updates=False, params_only=False):
                 det['aps_y_m'].append(data[f]['XYZ'][p]['APS_Y_M'])
                 det['aps_z_m'].append(data[f]['XYZ'][p]['APS_Z_M'])
                 det['bytes'].append(data[f]['XYZ'][p]['BYTES_FROM_LAST_PING'])
+
+            elif ftype == 'gsf':  # coverage-only GSF: depth/width/BS; modes/params are NA
+                ping = data[f]['XYZ'][p]
+                det['model'].append(ping.get('MODEL', 'GSF'))
+                det['sn'].append(ping.get('SYS_SN', 'NA'))
+                dt = ping.get('datetime')
+                if not isinstance(dt, datetime.datetime):
+                    try:
+                        dt = datetime.datetime.strptime(str(ping.get('DATE', 0)), '%Y%m%d') + \
+                             datetime.timedelta(milliseconds=ping.get('TIME', 0))
+                    except (TypeError, ValueError):
+                        dt = datetime.datetime(1, 1, 1, 0, 0)
+                det['datetime'].append(dt)
+                det['date'].append(dt.strftime('%Y-%m-%d'))
+                det['time'].append(dt.strftime('%H:%M:%S.%f'))
+                det['swath_mode'].append('NA')
+                det['frequency'].append('NA')
+                for k in ('max_port_deg', 'max_stbd_deg', 'max_port_m', 'max_stbd_m'):
+                    det[k].append('NA')
+                for k in ('tx_x_m', 'tx_y_m', 'tx_z_m', 'tx_r_deg', 'tx_p_deg', 'tx_h_deg',
+                          'rx_x_m', 'rx_y_m', 'rx_z_m', 'rx_r_deg', 'rx_p_deg', 'rx_h_deg',
+                          'wl_z_m', 'aps_x_m', 'aps_y_m', 'aps_z_m'):
+                    det[k].append(0.0)
+                det['aps_num'].append(-1)
+                det['bytes'].append(ping.get('BYTES_FROM_LAST_PING', 0))
 
             elif ftype == 'kmall':  # .kmall store date and time from datetime object
                                 # Debug: Check what keys are available in RTP data for first ping
@@ -3450,16 +3615,24 @@ def save_all_plots(self):
         return
     
     # Define plot types and their corresponding figures
+    skip_gsf_mode_plots = (getattr(self, '_gsf_mode_plots_unsupported', False) or
+                           plotted_coverage_is_gsf_only(self))
     plot_types = [
         ('Depth', self.swath_figure),
         ('Backscatter', self.backscatter_figure),
-        ('Depth_Mode', self.pingmode_figure),
-        ('Pulse_Form', self.pulseform_figure),
-        ('Swath_Mode', self.swathmode_figure),
-        ('Frequency', self.frequency_figure),
     ]
+    if not skip_gsf_mode_plots:
+        plot_types.extend([
+            ('Depth_Mode', self.pingmode_figure),
+            ('Pulse_Form', self.pulseform_figure),
+        ])
+    plot_types.append(('Swath_Mode', self.swathmode_figure))
+    if not skip_gsf_mode_plots:
+        plot_types.append(('Frequency', self.frequency_figure))
     if getattr(self, 'timing_data_extracted', False):
         plot_types.append(('Timing', self.time_figure))
+    if skip_gsf_mode_plots:
+        update_log(self, 'Skipping Depth Mode, Pulse Form, and Frequency exports (not supported for GSF-only data).')
     data_rate_export_labels = list(DATA_RATE_COLORMAP_LABELS)
     selected_data_rate_colormap = get_data_rate_colormap_label(self)
 
@@ -4232,10 +4405,17 @@ def clear_plot(self):
     self.hist_ax.clear()
     self.backscatter_ax.clear()
     self.pingmode_ax.clear()
+    if hasattr(self, 'pulseform_ax'):
+        self.pulseform_ax.clear()
+    if hasattr(self, 'swathmode_ax'):
+        self.swathmode_ax.clear()
+    if hasattr(self, 'frequency_ax'):
+        self.frequency_ax.clear()
     self.data_rate_ax1.clear()
     self.data_rate_ax2.clear()
     self.x_max = 1
     self.z_max = 1
+    self._gsf_mode_plots_unsupported = False
     # When scaling to filtered data, reset so limits are built only from filtered bounds
     try:
         primary_filters = (getattr(self, 'angle_gb', None) and self.angle_gb.isChecked()) or \
@@ -4559,17 +4739,19 @@ def show_archive(self):
             except:
                 print('failed to plot archive backscatter')
 
-            try:
-                plot_pingmode(self, self.det_archive[k], is_archive=True, det_name=k)  # plot det_archive ping mode
+            skip_mode_plots = det_sources_are_gsf_only(self.det_archive[k])
+            if not skip_mode_plots:
+                try:
+                    plot_pingmode(self, self.det_archive[k], is_archive=True, det_name=k)  # plot det_archive ping mode
 
-            except:
-                print('failed to plot archive ping mode')
+                except:
+                    print('failed to plot archive ping mode')
 
-            try:
-                plot_pulseform(self, self.det_archive[k], is_archive=True, det_name=k)  # plot det_archive pulse form
+                try:
+                    plot_pulseform(self, self.det_archive[k], is_archive=True, det_name=k)  # plot det_archive pulse form
 
-            except:
-                print('failed to plot archive pulse form')
+                except:
+                    print('failed to plot archive pulse form')
 
             try:
                 plot_swathmode(self, self.det_archive[k], is_archive=True, det_name=k)  # plot det_archive swath mode
@@ -4577,11 +4759,12 @@ def show_archive(self):
             except:
                 print('failed to plot archive swath mode')
 
-            try:
-                plot_frequency(self, self.det_archive[k], is_archive=True, det_name=k)  # plot det_archive frequency
+            if not skip_mode_plots:
+                try:
+                    plot_frequency(self, self.det_archive[k], is_archive=True, det_name=k)  # plot det_archive frequency
 
-            except:
-                print('failed to plot archive frequency')
+                except:
+                    print('failed to plot archive frequency')
 
             # print('in show_archive, back from plot_data_rate')
             # print('in show_archive, n_plotted is now', n_plotted)

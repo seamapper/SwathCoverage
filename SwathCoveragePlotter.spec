@@ -20,14 +20,29 @@ try:
 except Exception:
     pass  # Use default version if reading fails
 
+# Bundle mbtoolkit GSF reader when present (optional; enables .gsf coverage import in the exe)
+_datas = [
+    ('libs', 'libs'),  # Include the libs folder
+    ('media', 'media'),  # Include the media folder
+]
+_mbtoolkit_bundled = False
+for _mbtoolkit_dir in ('mbtoolkit_gsf', 'mbtoolkit'):
+    _reader_marker = os.path.join(_mbtoolkit_dir, 'readers', 'base', 'pygsf.py')
+    if os.path.isfile(_reader_marker):
+        _datas.append((_mbtoolkit_dir, _mbtoolkit_dir))
+        _mbtoolkit_bundled = True
+        print(f'Including {_mbtoolkit_dir} for GSF support')
+        break
+if not _mbtoolkit_bundled:
+    print('NOTE: mbtoolkit not found — GSF (.gsf) support will be disabled in the executable')
+    print('      Download from https://github.com/oceanmapping/mbtoolkit and place as')
+    print('      mbtoolkit/ or mbtoolkit_gsf/ next to this spec before building.')
+
 a = Analysis(
     ['swath_coverage_plotter.py'],
     pathex=[],
     binaries=[],
-    datas=[
-        ('libs', 'libs'),  # Include the libs folder
-        ('media', 'media'),  # Include the media folder
-    ],
+    datas=_datas,
     hiddenimports=[
         'libs.swath_fun',
         'libs.swath_coverage_lib',
@@ -35,6 +50,7 @@ a = Analysis(
         'libs.parseEM',
         'libs.file_fun',
         'libs.gui_widgets',
+        'libs.parse_guard',
         'PyQt6.QtCore',
         'PyQt6.QtGui',
         'PyQt6.QtWidgets',
@@ -71,7 +87,3 @@ exe = EXE(
     entitlements_file=None,
     icon=os.path.join('media', 'mac.ico') if os.path.exists(os.path.join('media', 'mac.ico')) else None,
 )
-
-
-
-

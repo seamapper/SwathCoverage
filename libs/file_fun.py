@@ -58,7 +58,7 @@ def add_files(self, ftype_filter, input_dir='HOME', include_subdir=False, multis
 					default_dir = config.get("last_xyz_dir", default_dir)
 				elif 'xyd' in ftype_filter or 'Density surface' in ftype_filter:
 					default_dir = config.get("last_xyd_dir", default_dir)
-				elif 'all' in ftype_filter or 'kmall' in ftype_filter or 'ASCII' in ftype_filter or 'Crossline' in ftype_filter:
+				elif 'all' in ftype_filter or 'kmall' in ftype_filter or 'gsf' in ftype_filter or 'ASCII' in ftype_filter or 'Crossline' in ftype_filter:
 					default_dir = config.get("last_crossline_dir", default_dir)
 				elif 'pkl' in ftype_filter or 'archive' in ftype_filter.lower() or 'Saved swath coverage data' in ftype_filter:
 					default_dir = config.get("last_archive_dir", default_dir)
@@ -106,7 +106,7 @@ def add_files(self, ftype_filter, input_dir='HOME', include_subdir=False, multis
 						# Try to save to swath coverage config first, fall back to swath accuracy config
 						try:
 							from libs.swath_coverage_lib import update_last_directory
-							if 'all' in ftype_filter or 'kmall' in ftype_filter or 'ASCII' in ftype_filter or 'Crossline' in ftype_filter:
+							if 'all' in ftype_filter or 'kmall' in ftype_filter or 'gsf' in ftype_filter or 'ASCII' in ftype_filter or 'Crossline' in ftype_filter:
 								update_last_directory("last_crossline_dir", file_dir)
 							elif 'pkl' in ftype_filter or 'archive' in ftype_filter.lower() or 'Saved swath coverage data' in ftype_filter:
 								update_last_directory("last_archive_dir", file_dir)
@@ -118,7 +118,7 @@ def add_files(self, ftype_filter, input_dir='HOME', include_subdir=False, multis
 								update_last_directory("last_xyd_dir", file_dir)
 						except ImportError:
 							from libs.swath_accuracy_lib import update_last_directory
-							if 'all' in ftype_filter or 'kmall' in ftype_filter or 'ASCII' in ftype_filter or 'Crossline' in ftype_filter:
+							if 'all' in ftype_filter or 'kmall' in ftype_filter or 'gsf' in ftype_filter or 'ASCII' in ftype_filter or 'Crossline' in ftype_filter:
 								update_last_directory("last_crossline_dir", file_dir)
 							elif 'pkl' in ftype_filter or 'archive' in ftype_filter.lower() or 'Saved swath coverage data' in ftype_filter:
 								update_last_directory("last_archive_dir", file_dir)

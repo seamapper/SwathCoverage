@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.19" 
+__version__ = "2026.20" 
 
 # BSD-3-Clause License
 #
@@ -339,8 +339,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Set up button controls for specific actions
         # File management buttons
-        self.add_file_btn.clicked.connect(lambda: add_cov_files(self, 'Kongsberg (*.all *.kmall)'))
-        self.get_indir_btn.clicked.connect(lambda: add_cov_files(self, ['.all', '.kmall'], input_dir='',
+        self.add_file_btn.clicked.connect(lambda: add_cov_files(self, raw_swath_file_dialog_filter()))
+        self.get_indir_btn.clicked.connect(lambda: add_cov_files(self, raw_swath_extensions(), input_dir='',
                                                                  include_subdir=self.include_subdir_chk.isChecked()))
         self.rmv_file_btn.clicked.connect(lambda: remove_cov_files(self))
         self.clr_file_btn.clicked.connect(lambda: remove_cov_files(self, clear_all=True))
@@ -1110,7 +1110,10 @@ class MainWindow(QtWidgets.QMainWindow):
         raw_include_subdir_layout.addWidget(self.include_subdir_chk)
         raw_sources_controls_layout = BoxLayout([raw_add_layout, raw_include_subdir_layout, raw_remove_layout, self.scan_params_btn], 'v')
         swath_sources_layout.addLayout(raw_sources_controls_layout)
-        swath_sources_gb = GroupBox('Raw Swath Sources', swath_sources_layout, False, False, 'swath_sources_gb')
+        swath_sources_title = ('Swath Sources (KMALL, ALL, GSF)' if gsf_support_available()
+                               else 'Swath Sources (KMALL, ALL)')
+        swath_sources_gb = GroupBox(swath_sources_title, swath_sources_layout, False, False, 'swath_sources_gb')
+        self.swath_sources_gb = swath_sources_gb
         
         # Connect show path checkbox signal after it's created
         self.show_path_chk.toggled.connect(self.toggle_file_path_display)
@@ -1257,17 +1260,23 @@ class MainWindow(QtWidgets.QMainWindow):
         
         This method is called whenever files are added or removed from the file list.
         """
-        # Check for .all or .kmall files specifically
+        # Check for supported raw swath sources (.all / .kmall, and .gsf if mbtoolkit is present)
         has_source_files = False
+        has_kong_files = False
+        supported_exts = tuple(raw_swath_extensions())
         for i in range(self.file_list.count()):
             item = self.file_list.item(i)
-            if item and (item.text().endswith('.all') or item.text().endswith('.kmall')):
+            if not item:
+                continue
+            text = item.text().lower()
+            if text.endswith(supported_exts):
                 has_source_files = True
-                break
+            if text.endswith(('.all', '.kmall')):
+                has_kong_files = True
         
         self.calc_coverage_btn.setEnabled(has_source_files)
-        self.scan_params_btn.setEnabled(has_source_files)
-        self.convert_pickle_btn.setEnabled(has_source_files)
+        self.scan_params_btn.setEnabled(has_kong_files)
+        self.convert_pickle_btn.setEnabled(has_kong_files)
         
         update_parameters_tab_visibility(self)
         

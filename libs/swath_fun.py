@@ -7,6 +7,8 @@ from copy import deepcopy
 import sys
 import os
 import pickle
+import datetime
+import importlib.util
 # Import kmall from the same directory
 from .kmall import kmall, _KMALL_MIN_DGRAM_SIZE
 import utm
@@ -19,6 +21,13 @@ from .parse_guard import (
 	validate_kmall_mrz_counts,
 	MAX_KMALL_TX_SECTORS,
 )
+
+# Cached GSFREADER / SWATH_BATHYMETRY from bundled mbtoolkit (pure-Python pygsf)
+_GSF_READER_CLS = None
+_GSF_SWATH_ID = None
+_GSF_AVAILABLE = None  # None = not checked yet; True/False after probe
+_GSF_READER_BASE_DIR = None
+_MBTOOLKIT_URL = 'https://github.com/oceanmapping/mbtoolkit'
 
 _KMALL_SOUNDING_FORMAT = "1H8B1H6f2H18f4H"
 _KMALL_SOUNDING_STRUCT = struct.Struct(_KMALL_SOUNDING_FORMAT)
@@ -264,7 +273,7 @@ def interpretMode(self, data, print_updates):
 
 	for f in range(len(data)):
 		missing_mode = False
-		ftype = data[f]['fname'].rsplit('.', 1)[1]
+		ftype = data[f]['fname'].rsplit('.', 1)[1].lower()
 
 		if ftype == 'all':  # interpret .all modes from binary string
 			# KM ping modes for 1: EM3000, 2: EM3002, 3: EM2000,710,300,302,120,122, 4: EM2040
@@ -355,6 +364,12 @@ def interpretMode(self, data, print_updates):
 					ping = data[f]['XYZ'][p]
 					# Debug print removed
 
+		elif ftype == 'gsf':
+			# Coverage-only GSF import: modes / runtime params are not available
+			for p in range(len(data[f]['XYZ'])):
+				for k in ('PING_MODE', 'PULSE_FORM', 'SWATH_MODE', 'FREQUENCY'):
+					data[f]['XYZ'][p].setdefault(k, 'NA')
+
 		else:
 			print('UNSUPPORTED FTYPE --> NOT INTERPRETING MODES!')
 
@@ -364,6 +379,224 @@ def interpretMode(self, data, print_updates):
 
 	if print_updates:
 		print('\nDone interpreting modes...')
+
+	return data
+
+
+def _gsf_reader_candidate_dirs():
+	"""Possible mbtoolkit reader locations (dev tree, PyInstaller bundle, beside exe)."""
+	roots = []
+	# Normal source layout: <project>/libs/swath_fun.py → project root
+	roots.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+	# PyInstaller onefile/onedir extraction root
+	meipass = getattr(sys, '_MEIPASS', None)
+	if meipass:
+		roots.append(meipass)
+	# Optional sidecar next to the frozen executable
+	if getattr(sys, 'frozen', False):
+		roots.append(os.path.dirname(os.path.abspath(sys.executable)))
+
+	candidates = []
+	seen = set()
+	for root in roots:
+		if not root:
+			continue
+		root = os.path.abspath(root)
+		if root in seen:
+			continue
+		seen.add(root)
+		for folder in ('mbtoolkit_gsf', 'mbtoolkit'):
+			candidates.append(os.path.join(root, folder, 'readers', 'base'))
+	return candidates
+
+
+def mbtoolkit_gsf_missing_message():
+	return (
+		'GSF support requires mbtoolkit '
+		f'(download from {_MBTOOLKIT_URL}). '
+		'Place it as mbtoolkit/ or mbtoolkit_gsf/ next to this project so '
+		'readers/base/pygsf.py is available.'
+	)
+
+
+def gsf_support_available():
+	"""Return True if mbtoolkit GSF reader (pygsf) can be loaded."""
+	global _GSF_AVAILABLE
+	if _GSF_AVAILABLE is not None:
+		return _GSF_AVAILABLE
+	try:
+		_load_gsf_reader()
+		_GSF_AVAILABLE = True
+	except Exception:
+		_GSF_AVAILABLE = False
+	return _GSF_AVAILABLE
+
+
+def _load_gsf_reader():
+	"""Load GSFREADER and SWATH_BATHYMETRY from mbtoolkit pygsf."""
+	global _GSF_READER_CLS, _GSF_SWATH_ID, _GSF_READER_BASE_DIR
+	if _GSF_READER_CLS is not None:
+		return _GSF_READER_CLS, _GSF_SWATH_ID
+
+	errors = []
+	for base_dir in _gsf_reader_candidate_dirs():
+		init_path = os.path.join(base_dir, '__init__.py')
+		pygsf_path = os.path.join(base_dir, 'pygsf.py')
+		if not (os.path.isfile(init_path) and os.path.isfile(pygsf_path)):
+			errors.append(f'missing reader at {base_dir}')
+			continue
+		try:
+			spec = importlib.util.spec_from_file_location('mbtoolkit_gsf_readers_base', init_path)
+			if spec is None or spec.loader is None:
+				errors.append(f'could not create import spec for {init_path}')
+				continue
+			mod = importlib.util.module_from_spec(spec)
+			spec.loader.exec_module(mod)
+			if not hasattr(mod, 'GSFREADER') or not hasattr(mod, 'SWATH_BATHYMETRY'):
+				errors.append(f'{init_path} does not export GSFREADER/SWATH_BATHYMETRY')
+				continue
+			_GSF_READER_CLS = mod.GSFREADER
+			_GSF_SWATH_ID = mod.SWATH_BATHYMETRY
+			_GSF_READER_BASE_DIR = base_dir
+			return _GSF_READER_CLS, _GSF_SWATH_ID
+		except Exception as exc:
+			errors.append(f'{base_dir}: {exc}')
+
+	raise ImportError(
+		mbtoolkit_gsf_missing_message() +
+		((' Details: ' + '; '.join(errors)) if errors else '')
+	)
+
+
+def readGSFswath(self, filename, print_updates=False, parse_params_only=False):
+	"""Parse coverage-relevant fields from a GSF file (depth / across / BS / beam flags).
+
+	Uses the bundled mbtoolkit pure-Python reader. Returns a data dict shaped like
+	readALLswath so sortDetectionsCoverage can reuse ALL-style XYZ keys. Mode / install /
+	runtime parameters are filled with NA / zeros (coverage-only import).
+	"""
+	if not gsf_support_available():
+		raise ImportError(mbtoolkit_gsf_missing_message())
+
+	GSFREADER, SWATH_BATHYMETRY = _load_gsf_reader()
+	begin_file_parse()
+
+	data = {
+		'fname': filename,
+		'XYZ': {},
+		'RTP': {},
+		'IP': {},
+		'RRA': {},
+		'POS': {},
+	}
+
+	reader = GSFREADER(filename)
+	last_ping_start = 0
+	ping_i = 0
+
+	try:
+		while reader.moreData():
+			check_cancel()
+			nbytes, recid, dg = reader.readDatagram()
+			if recid != SWATH_BATHYMETRY or dg is None:
+				continue
+
+			reader.scalefactorsd = dg.read(reader.scalefactorsd, headeronly=False)
+			nbeams = int(getattr(dg, 'numbeams', 0) or 0)
+			if nbeams <= 0 or len(dg.DEPTH_ARRAY) == 0:
+				continue
+
+			depth = np.asarray(dg.DEPTH_ARRAY, dtype=float)
+			across = (np.asarray(dg.ACROSS_TRACK_ARRAY, dtype=float)
+			          if len(dg.ACROSS_TRACK_ARRAY) == nbeams
+			          else np.zeros(nbeams, dtype=float))
+			angle = (np.asarray(dg.BEAM_ANGLE_ARRAY, dtype=float)
+			         if len(dg.BEAM_ANGLE_ARRAY) == nbeams
+			         else np.zeros(nbeams, dtype=float))
+
+			if len(dg.MEAN_REL_AMPLITUDE_ARRAY) == nbeams:
+				bs = np.asarray(dg.MEAN_REL_AMPLITUDE_ARRAY, dtype=float)
+			elif len(dg.MEAN_CAL_AMPLITUDE_ARRAY) == nbeams:
+				bs = np.asarray(dg.MEAN_CAL_AMPLITUDE_ARRAY, dtype=float)
+			else:
+				bs = np.zeros(nbeams, dtype=float)
+
+			if len(dg.BEAM_FLAGS_ARRAY) == nbeams:
+				flags = np.asarray(dg.BEAM_FLAGS_ARRAY, dtype=np.uint8)
+			else:
+				flags = np.zeros(nbeams, dtype=np.uint8)
+
+			# GSF ignore/reject bit (0x01); also reject non-finite depth/across
+			valid = ((flags & 0x01) == 0) & np.isfinite(depth) & np.isfinite(across)
+			# ALL-style detection info: valid < 128
+			det_info = np.where(valid, 0, 128).astype(np.uint8)
+
+			try:
+				dt = datetime.datetime.utcfromtimestamp(float(dg.timestamp))
+			except (OverflowError, OSError, ValueError, TypeError):
+				dt = datetime.datetime(1, 1, 1, 0, 0)
+
+			ping_start = int(getattr(dg, 'offset', 0) or 0)
+			bytes_from_last = max(0, ping_start - last_ping_start) if ping_i > 0 else 0
+			last_ping_start = ping_start
+
+			# Params-only scan: keep a timestamped ping stub without sounding arrays
+			if parse_params_only:
+				xyz = {
+					'RX_DEPTH': [0.0],
+					'RX_ACROSS': [0.0],
+					'RX_BS': [0.0],
+					'RX_ANGLE': [0.0],
+					'RX_DET_INFO': [128],
+					'datetime': dt,
+					'DATE': int(dt.strftime('%Y%m%d')) if dt.year > 1 else 0,
+					'TIME': int((dt.hour * 3600 + dt.minute * 60 + dt.second) * 1000 +
+					            dt.microsecond // 1000) if dt.year > 1 else 0,
+				}
+			else:
+				xyz = {
+					'RX_DEPTH': depth.tolist(),
+					'RX_ACROSS': across.tolist(),
+					'RX_BS': bs.tolist(),
+					'RX_ANGLE': angle.tolist(),
+					'RX_DET_INFO': det_info.tolist(),
+					'datetime': dt,
+					'DATE': int(dt.strftime('%Y%m%d')) if dt.year > 1 else 0,
+					'TIME': int((dt.hour * 3600 + dt.minute * 60 + dt.second) * 1000 +
+					            dt.microsecond // 1000) if dt.year > 1 else 0,
+				}
+
+			xyz.update({
+				'MODEL': 'GSF',
+				'SYS_SN': 'NA',
+				'PING_MODE': 'NA',
+				'PULSE_FORM': 'NA',
+				'SWATH_MODE': 'NA',
+				'FREQUENCY': 'NA',
+				'MAX_PORT_DEG': 'NA',
+				'MAX_STBD_DEG': 'NA',
+				'MAX_PORT_M': 'NA',
+				'MAX_STBD_M': 'NA',
+				'TX_X_M': 0.0, 'TX_Y_M': 0.0, 'TX_Z_M': 0.0,
+				'TX_R_DEG': 0.0, 'TX_P_DEG': 0.0, 'TX_H_DEG': 0.0,
+				'RX_X_M': 0.0, 'RX_Y_M': 0.0, 'RX_Z_M': 0.0,
+				'RX_R_DEG': 0.0, 'RX_P_DEG': 0.0, 'RX_H_DEG': 0.0,
+				'WL_Z_M': 0.0,
+				'APS_NUM': -1, 'APS_X_M': 0.0, 'APS_Y_M': 0.0, 'APS_Z_M': 0.0,
+				'BYTES_FROM_LAST_PING': bytes_from_last,
+			})
+
+			data['XYZ'][ping_i] = xyz
+			ping_i += 1
+
+			if print_updates and ping_i % 500 == 0:
+				print(f'GSF parse: {ping_i} pings from {os.path.basename(filename)}')
+
+	finally:
+		reader.close()
+
+	if print_updates:
+		print(f'GSF parse complete: {ping_i} pings from {os.path.basename(filename)}')
 
 	return data
 
