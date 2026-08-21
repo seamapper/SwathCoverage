@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.20" 
+__version__ = "2026.21" 
 
 # BSD-3-Clause License
 #
@@ -1967,6 +1967,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plot_tabs.addTab(self.plot_tab9, 'Parameters')
         self.timing_tab_index = self.plot_tabs.indexOf(self.plot_tab8)
         self.parameters_tab_index = self.plot_tabs.indexOf(self.plot_tab9)
+
+        # About This Program tab (always visible; last in the center column)
+        self.plot_tab_about = self._build_about_program_tab()
+        self.about_tab_index = self.plot_tabs.addTab(self.plot_tab_about, 'About This Program')
         self.extract_timing_chk.toggled.connect(lambda: update_timing_tab_visibility(self))
         update_timing_tab_visibility(self)
         update_parameters_tab_visibility(self)
@@ -1982,6 +1986,117 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.data_toolbar, self.time_toolbar):
             toolbar.setMinimumWidth(0)
         # self.center_layout.addStretch()
+
+    @staticmethod
+    def _program_freeze_date_text():
+        """Return freeze/build date for the About tab (exe mtime when frozen)."""
+        if getattr(sys, 'frozen', False):
+            try:
+                ts = os.path.getmtime(sys.executable)
+                return datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
+            except OSError:
+                return 'Unknown'
+        return 'Not frozen (running from source)'
+
+    def _resolve_media_file(self, filename):
+        """Resolve a media asset for source runs and PyInstaller bundles."""
+        candidates = [
+            os.path.join(self.media_path, filename),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'media', filename),
+        ]
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            candidates.insert(0, os.path.join(meipass, 'media', filename))
+        for path in candidates:
+            if path and os.path.isfile(path):
+                return path
+        return candidates[0]
+
+    def _build_about_program_tab(self):
+        """Build the About This Program center-column tab."""
+        tab = QtWidgets.QWidget()
+        tab.setSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                          QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+
+        content = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(content)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+
+        # MAC logo
+        logo_label = QtWidgets.QLabel()
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_path = self._resolve_media_file('mac.png')
+        pixmap = QtGui.QPixmap(logo_path)
+        if not pixmap.isNull():
+            max_w = 280
+            if pixmap.width() > max_w:
+                pixmap = pixmap.scaledToWidth(max_w, Qt.TransformationMode.SmoothTransformation)
+            logo_label.setPixmap(pixmap)
+        else:
+            logo_label.setText('MAC')
+            logo_label.setStyleSheet('font-size: 28px; font-weight: bold;')
+        layout.addWidget(logo_label)
+
+        title = QtWidgets.QLabel('Swath Coverage Plotter')
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet('font-size: 22px; font-weight: bold; margin-top: 8px;')
+        layout.addWidget(title)
+
+        version = QtWidgets.QLabel(f'Version {__version__}')
+        version.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version.setStyleSheet('font-size: 14px;')
+        layout.addWidget(version)
+
+        freeze = QtWidgets.QLabel(f'Frozen: {self._program_freeze_date_text()}')
+        freeze.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        freeze.setStyleSheet('font-size: 13px; color: #bbbbbb;')
+        layout.addWidget(freeze)
+
+        developers = QtWidgets.QLabel(
+            'Developers: Kevin Jerram (kjerram@ccom.unh.edu) and '
+            'Paul Johnson (pjohnson@ccom.unh.edu)'
+        )
+        developers.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        developers.setWordWrap(True)
+        developers.setStyleSheet('font-size: 13px; margin-top: 4px;')
+        layout.addWidget(developers)
+
+        body = QtWidgets.QLabel()
+        body.setWordWrap(True)
+        body.setTextFormat(Qt.TextFormat.RichText)
+        body.setOpenExternalLinks(True)
+        body.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        body.setStyleSheet('font-size: 13px; line-height: 1.4; margin-top: 16px;')
+        body.setText(
+            '<p>A comprehensive toolkit for analyzing swath coverage data from Kongsberg multibeam systems.</p>'
+            '<p>KMALL file reading is based on code from Val Schmidt, available at '
+            '<a href="https://github.com/valschmidt/kmall">https://github.com/valschmidt/kmall</a>.</p>'
+            '<p>GSF file reading is from the Community Multibeam Toolkit, available at '
+            '<a href="https://github.com/oceanmapping/mbtoolkit">https://github.com/oceanmapping/mbtoolkit</a>.</p>'
+            '<p>Developed at the Center for Coastal and Ocean Mapping (CCOM) / Joint Hydrographic Center (JHC), '
+            'University of New Hampshire.</p>'
+            '<p>This work was supported by the National Science Foundation under:</p>'
+            '<ul>'
+            '<li>Award #1933720 — <i>Collaborative Research: Optimization of the Multibeam Sonar Systems of the '
+            'U.S. Academic Fleet through Coordinated System Testing, Tool Development, and Community Outreach</i></li>'
+            '<li>Award #2614984 — <i>Advancing U.S. Leadership in Seafloor Mapping Technology for the '
+            'Academic Research Fleet</i></li>'
+            '</ul>'
+        )
+        layout.addWidget(body)
+        layout.addStretch(1)
+
+        scroll.setWidget(content)
+        tab_layout = QtWidgets.QVBoxLayout(tab)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.addWidget(scroll)
+        return tab
 
     
     def set_right_layout(self):

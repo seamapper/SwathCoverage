@@ -149,7 +149,7 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 
 Long-running operations (**Calculate Coverage**, **Scan Parameters Only**, **Convert to Swath PKL**, **Convert to Archive PKL**, and Swath PKL loading) show a **modal progress dialog** with the current filename and file count. The dialog closes automatically when processing finishes. Raw coverage parsing runs in a background worker and can be cancelled from the dialog.
 
-### Center Panel — Plots (up to 9 tabs; some hidden by data source)
+### Center Panel — Plots (up to 10 tabs; some hidden by data source)
 | Tab | Content | Visibility |
 |---|---|---|
 | Depth | Main swath coverage scatter plot, colored by depth | Always |
@@ -161,6 +161,7 @@ Long-running operations (**Calculate Coverage**, **Scan Parameters Only**, **Con
 | Data Rate | Data acquisition rate over time | Always |
 | Timing | Ping interval / timing analysis | Only when **Extract Timing** is enabled during raw Kongsberg coverage calculation |
 | Parameters | Search controls + runtime parameter change table | Only when raw KMALL/ALL files are loaded in **Raw Swath Sources** |
+| About This Program | MAC logo, program name/version/freeze date, attributions, and NSF funding acknowledgments | Always |
 
 The **Parameters** tab combines search controls and the acquisition parameter table. Use **Search Parameters** to filter by depth mode, swath mode, pulse form, angles, coverage, frequency, and installation parameters, then click **Update Search**. Rows are in chronological order; cells that changed from the previous row are highlighted; the first row is never highlighted. **Save Search Log** exports the table as CSV (or plain text with a CSV body). Export Analysis also writes `acquisition_log.csv` from this table.
 
