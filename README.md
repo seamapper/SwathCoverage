@@ -526,6 +526,10 @@ This project is licensed under the BSD-3-Clause License - see the [LICENSE](LICE
 
 Developed at the Center for Coastal and Ocean Mapping (CCOM) / Joint Hydrographic Center (JHC), University of New Hampshire.
 
+This work was supported by the National Science Foundation under:
+- Award #1933720 — *Collaborative Research: Optimization of the Multibeam Sonar Systems of the U.S. Academic Fleet through Coordinated System Testing, Tool Development, and Community Outreach*
+- Award #2614984 — *Advancing U.S. Leadership in Seafloor Mapping Technology for the Academic Research Fleet*
+
 KMALL support is based on code from Val Schmidt, available at ([valschmidt/kmall](https://github.com/valschmidt/kmall)).
 
 GSF support uses the Multibeam Community Toolkit ([mbtoolkit](https://github.com/oceanmapping/mbtoolkit)).
