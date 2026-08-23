@@ -669,8 +669,8 @@ def remove_data(self, removed_files):
         print('trying to remove file =', fname)
 
         try:  # try to remove detections associated with this file
-            # get indices of soundings in det dict with matching .all or .kmall filenames
-            if self.det and any(fext in fname for fext in ['.all', '.kmall']):
+            # get indices of soundings in det dict with matching raw filenames
+            if self.det and any(fext in fname.lower() for fext in ['.all', '.kmall', '.gsf']):
                 i = [j for j in range(len(self.det['fname'])) if self.det['fname'][j] == fname]
                 for k in self.det.keys():  # loop through all keys and remove values at these indices
                     self.det[k] = np.delete(self.det[k], i).tolist()
@@ -697,10 +697,11 @@ def update_show_data_checks(self):
     get_current_file_list(self)
     fnames_all = [f for f in self.filenames if '.all' in f]
     fnames_kmall = [f for f in self.filenames if '.kmall' in f]
+    fnames_gsf = [f for f in self.filenames if '.gsf' in f.lower()]
     fnames_pkl = [f for f in self.filenames if '.pkl' in f]
     fnames_txt = [f for f in self.filenames if '.txt' in f]
 
-    if len(fnames_all + fnames_kmall) == 0:  # all new files have been removed
+    if len(fnames_all + fnames_kmall + fnames_gsf) == 0:  # all new files have been removed
         self.det = {}
         clear_lasso_exclusions(self)
         self.show_data_chk.setChecked(False)
@@ -1212,10 +1213,11 @@ def update_show_data_checks_coverage(self):
     get_current_file_list(self)
     fnames_all = [f for f in self.filenames if '.all' in f]
     fnames_kmall = [f for f in self.filenames if '.kmall' in f]
+    fnames_gsf = [f for f in self.filenames if '.gsf' in f.lower()]
     fnames_pkl = [f for f in self.filenames if '.pkl' in f]
     fnames_txt = [f for f in self.filenames if '.txt' in f]
 
-    if len(fnames_all + fnames_kmall) == 0:  # all new files have been removed
+    if len(fnames_all + fnames_kmall + fnames_gsf) == 0:  # all new files have been removed
         self.det = {}
         clear_lasso_exclusions(self)
         self.show_data_chk.setChecked(False)
