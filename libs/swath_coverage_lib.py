@@ -3627,16 +3627,20 @@ def save_all_plots(self):
         plot_types.extend([
             ('Depth_Mode', self.pingmode_figure),
             ('Pulse_Form', self.pulseform_figure),
+            ('Swath_Mode', self.swathmode_figure),
+            ('Frequency', self.frequency_figure),
         ])
-    plot_types.append(('Swath_Mode', self.swathmode_figure))
-    if not skip_gsf_mode_plots:
-        plot_types.append(('Frequency', self.frequency_figure))
     if getattr(self, 'timing_data_extracted', False):
         plot_types.append(('Timing', self.time_figure))
     if skip_gsf_mode_plots:
-        update_log(self, 'Skipping Depth Mode, Pulse Form, and Frequency exports (not supported for GSF-only data).')
-    data_rate_export_labels = list(DATA_RATE_COLORMAP_LABELS)
+        update_log(self, 'Skipping Depth Mode, Pulse Form, Swath Mode, and Frequency exports (not supported for GSF-only data).')
+        data_rate_export_labels = ['Depth', 'Backscatter']
+        update_log(self, 'Exporting Data Rate plots colored by Depth and Backscatter only (GSF-only).')
+    else:
+        data_rate_export_labels = list(DATA_RATE_COLORMAP_LABELS)
     selected_data_rate_colormap = get_data_rate_colormap_label(self)
+    if skip_gsf_mode_plots and selected_data_rate_colormap not in data_rate_export_labels:
+        selected_data_rate_colormap = 'Depth'
 
     if os.path.isdir(save_dir) and os.listdir(save_dir):
         update_log(self, f'Overwriting existing export files in: {save_dir}')
