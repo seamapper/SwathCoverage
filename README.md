@@ -85,7 +85,7 @@ A comprehensive GUI application for analyzing and visualizing multibeam echosoun
 - **Interactive Visualization**: Hover over data points to see the source filename in the status bar
 - **Coverage Trend Analysis**: Calculate, edit, digitize, and export swath coverage trends
 - **Data Filtering**: Filter by angle, depth, width, backscatter, ping interval, and runtime parameters
-- **Archive Management**: Archive processed data for later comparison
+- **Archive Management**: Archive processed data for later comparison; **Add Archive PKL** / **Add Directory** auto-enable **Archive data** on the Plot tab and refresh the plot after load
 - **Archive Conversion from Raw Files**: **Convert to Archive PKL** can auto-calculate coverage first when needed
 - **Archive Conversion from Swath PKL**: **Convert to Archive PKL** on the Swath PKL tab converts loaded Swath PKL data directly to one Archive PKL
 - **Export Functionality**: Save all plots and export coverage trends (e.g., for Gap Filler)
@@ -108,7 +108,7 @@ python swath_coverage_plotter.py
 
 **Method 2: Windows Executable**
 ```
-Swath_Coverage_Plotter_v2026.23.exe
+Swath_Coverage_Plotter_v2026.24.exe
 ```
 Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 
@@ -116,8 +116,8 @@ Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 1. Launch the application
 2. Load data using one of the following methods:
    - **Raw tab**: Add KMALL/ALL files (and **GSF** if mbtoolkit is available — see [GSF Support](#gsf-support)), optionally enable **Save Index** and **Extract Timing**, then click **Calculate Coverage**
-   - **Swath PKL tab**: Load pre-converted PKL files (faster loading)
-   - **Archive PKL tab**: Load previously archived data for comparison
+   - **Swath PKL tab**: Load pre-converted PKL files (faster loading; **Swath Data** is on by default and plots after load)
+   - **Archive PKL tab**: Load previously archived data for comparison (**Archive data** is enabled automatically when you add archive PKL files)
 3. Optional fast parameter scan (Raw tab only): click **Scan Parameters Only** after adding Kongsberg raw files (not applicable to GSF)
 4. Optional PKL conversion (Raw tab):
    - **Convert to Swath PKL**: batch-convert Kongsberg raw files to compressed Swath PKL files
@@ -330,7 +330,7 @@ build_swath_coverage_exe.bat
 build_kmall_exe.bat
 ```
 
-Output is placed in the `dist/` folder, named with the current version (e.g., `Swath_Coverage_Plotter_v2026.23.exe`, `KMALL_to_SwathPKL_Converter_v2026.06.exe`).
+Output is placed in the `dist/` folder, named with the current version (e.g., `Swath_Coverage_Plotter_v2026.24.exe`, `KMALL_to_SwathPKL_Converter_v2026.06.exe`).
 
 For **GSF support in the plotter executable**, place `mbtoolkit/` or `mbtoolkit_gsf/` (with `readers/base/pygsf.py`) next to `SwathCoveragePlotter.spec` before building. The build log reports whether mbtoolkit was included. Without it, the exe still builds but disables `.gsf` handling at runtime.
 
@@ -484,6 +484,14 @@ If an older `.swathcov.idx` file cannot be loaded (for example, because it was p
 14. **Import Analysis Group redraws archive data multiple times**
    - Current builds defer plot refreshes during import and refresh once at the end; archive PKL loading no longer triggers intermediate redraws
 
+15. **Archive PKL added but nothing plots**
+   - Adding archive PKL files should enable **Archive data** and refresh automatically; if the plot is still empty, confirm the archive file contains sounding data (not a tiny/empty PKL)
+   - Ensure **Archive data** is checked on the Plot tab (it is turned on automatically when you add archive files)
+
+16. **Swath PKL added but nothing plots**
+   - **Swath Data** defaults to on; **Add PKL Files** re-enables it if you had turned it off
+   - If you added PKLs via **Add Directory** or **Import Analysis Group** with **Swath Data** unchecked, re-check **Swath Data** on the Plot tab
+
 ### Getting Help
 
 1. Check the **Activity Log** in the left panel for detailed error messages
@@ -496,6 +504,7 @@ If an older `.swathcov.idx` file cannot be loaded (for example, because it was p
 ## Version History
 
 ### Swath Coverage Plotter
+- **v2026.24**: Fixed archive PKL auto-display after **Add Archive PKL** / **Add Directory** (plot refresh now runs when **Archive data** is auto-enabled); archive directory add routed through shared `load_archive_files` helper
 - **v2026.23**: KMALL `.swathcov.idx` sidecars no longer store a pandas `Index` (no `pyarrow` dependency); incompatible old sidecars are deleted and rebuilt automatically; per-file parse errors surfaced when 0/N files succeed; analysis group import uses a single deferred plot refresh and auto-runs coverage when raw files are loaded without existing soundings; stale processed-file tracking reconciled before coverage calculation; GUI parse options snapshotted on the main thread before background parsing
 - **v2026.20**: Optional **GSF** (`.gsf`) coverage-only import via [mbtoolkit](https://github.com/oceanmapping/mbtoolkit) (depth / width / BS); automatic mbtoolkit detection (UI and parsing skip GSF when absent); GSF-only Depth Mode / Pulse Form / Frequency plots show an unsupported notice and are omitted from Export Analysis; `SwathCoveragePlotter.spec` bundles mbtoolkit when present at build time
 - **v2026.12**: Raw tab UI reorganized (**Swath Coverage Calculation**, **Convert to Swath PKL**, **Convert to Archive PKL** groupboxes); **Scan Parameters Only**; **Include Subdirectories**; optional **Save Index** and **Extract Timing**; responsive background raw parsing with cancellable current-file progress; malformed ALL/KMALL hang guards; partial-text selection filters for Raw, Swath PKL, and Archive PKL source lists; depth/width filters kept independent from custom plot limits; **Parameters** tab table with change highlighting (hidden for Swath/Archive PKL-only loads); **Timing** tab hidden unless Extract Timing is enabled; fast KMALL index cache and plot-mode reads; PKL conversion aligned with coverage-only outermost-sounding pipeline
