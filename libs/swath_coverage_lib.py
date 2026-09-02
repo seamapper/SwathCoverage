@@ -4780,7 +4780,7 @@ def load_archive_files(self, archive_files, refresh=True):
             self.show_data_chk_arc.setChecked(True)
         finally:
             self.show_data_chk_arc.blockSignals(False)
-    elif refresh:
+    if refresh:
         refresh_plot(self)
 
 

@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.23" 
+__version__ = "2026.24" 
 
 # BSD-3-Clause License
 #
@@ -3334,44 +3334,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 if not new_archive_files:
                     self.update_log("No new archive files to load.")
                     return
-                
-                # Ensure tracking structures exist
-                if not hasattr(self, 'det_archive'):
-                    self.det_archive = {}
-                if not hasattr(self, 'archive_filenames'):
-                    self.archive_filenames = []
-                
-                # Load each archive file (mirror logic from load_archive)
-                for archive_file in new_archive_files:
-                    fname_str = os.path.basename(archive_file)
-                    try:
-                        try:
-                            with gzip.open(archive_file, 'rb') as f_handle:
-                                det_archive_new = pickle.load(f_handle)
-                            compression_info = " (compressed)"
-                        except (OSError, gzip.BadGzipFile):
-                            with open(archive_file, 'rb') as f_handle:
-                                det_archive_new = pickle.load(f_handle)
-                            compression_info = " (uncompressed)"
-                        self.det_archive[fname_str] = det_archive_new
-                        self.update_log(f'Loaded archive {fname_str}{compression_info}')
-                        if archive_file not in self.archive_filenames:
-                            self.archive_filenames.append(archive_file)
-                            if hasattr(self, 'archive_file_list'):
-                                # Respect show path checkbox when adding
-                                display_text = archive_file if getattr(self, 'show_archive_path_chk', None) and self.show_archive_path_chk.isChecked() else fname_str
-                                self.archive_file_list.addItem(display_text)
-                                self.original_archive_paths[self.archive_file_list.count() - 1] = archive_file
-                    except Exception as e:
-                        self.update_log(f'Failed to load archive {fname_str}: {str(e)}')
-                
-                update_button_states(self)
-                if hasattr(self, 'update_save_plots_button_color'):
-                    self.update_save_plots_button_color()
-                if not self.show_data_chk_arc.isChecked():
-                    self.show_data_chk_arc.setChecked(True)
-                else:
-                    refresh_plot(self)
+
+                load_archive_files(self, new_archive_files)
         
         except Exception as e:
             self.update_log(f"Error adding archive PKL files from directory: {str(e)}")
