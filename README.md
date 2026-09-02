@@ -77,7 +77,7 @@ A comprehensive GUI application for analyzing and visualizing multibeam echosoun
   - **Show Path** toggle and a text filter for each source list; typing a partial filename or path selects matching files for **Remove Selected**
   - Separate **Convert to Swath PKL** and **Convert to Archive PKL** groupboxes on the Raw tab
 - **Optional GSF Import**: Coverage-only `.gsf` support (depth, swath width, backscatter) via [mbtoolkit](https://github.com/oceanmapping/mbtoolkit); Depth Mode / Pulse Form / Frequency plots are blank for GSF-only sessions and omitted from Export Analysis
-- **Fast KMALL Processing**: Optional `.swathcov.idx` index sidecars, single-pass extraction, and plot-mode outermost-sounding reads
+- **Fast KMALL Processing**: Optional `.swathcov.idx` index sidecars, single-pass extraction, and plot-mode outermost-sounding reads (sidecars store datagram offsets only — **pyarrow is not required**)
 - **Corrupt-File Protection**: Bounded resynchronization, datagram-size/count validation, cancellation, and per-file parsing timeouts prevent malformed ALL/KMALL files from hanging the application
 - **Extract Timing** (optional): Parse SKM datagrams and show the Timing plot tab when enabled during coverage calculation
 - **Save Index** (optional): Keep KMALL index sidecars after **Calculate Coverage** for faster re-indexing; PKL conversion always removes sidecars
@@ -89,7 +89,7 @@ A comprehensive GUI application for analyzing and visualizing multibeam echosoun
 - **Archive Conversion from Raw Files**: **Convert to Archive PKL** can auto-calculate coverage first when needed
 - **Archive Conversion from Swath PKL**: **Convert to Archive PKL** on the Swath PKL tab converts loaded Swath PKL data directly to one Archive PKL
 - **Export Functionality**: Save all plots and export coverage trends (e.g., for Gap Filler)
-- **Analysis Group Export/Import**: Export plots + `settings.txt` + analysis JSON, then re-import sources and Plot/Filter settings; remembers parent directory and save name between sessions and repeated exports
+- **Analysis Group Export/Import**: Export plots + `settings.txt` + analysis JSON, then re-import sources and Plot/Filter settings; remembers parent directory and save name between sessions and repeated exports; import defers plot refreshes until sources are loaded (single redraw) and auto-runs **Calculate Coverage** when raw files are present but no coverage data exist yet
 - **Enter-to-Commit Parameters**: Numeric fields apply on **Enter**; uncommitted edits show an amber/orange border
 - **Editable Filter Fields When Off**: Set filter/limit values before enabling a filter; inactive fields stay editable but visually dimmed
 - **Parameter Search**: Search acquisition parameters by mode, frequency, angles, and more
@@ -108,7 +108,7 @@ python swath_coverage_plotter.py
 
 **Method 2: Windows Executable**
 ```
-Swath_Coverage_Plotter_v2026.20.exe
+Swath_Coverage_Plotter_v2026.23.exe
 ```
 Executables are named `Swath_Coverage_Plotter_v` + version from the code.
 
@@ -253,6 +253,8 @@ Custom plot **depth** and **swath width** boxes are filled from the data extent 
 - utm (UTM coordinate conversions)
 - [mbtoolkit](https://github.com/oceanmapping/mbtoolkit) — required for **GSF** (`.gsf`) coverage import (see [GSF Support](#gsf-support))
 
+**Not required:** `pyarrow` — KMALL index sidecars (`.swathcov.idx`) do not depend on it. Older sidecars created on systems with `pyarrow` installed are ignored and rebuilt automatically if they cannot be loaded.
+
 #### Installation Steps
 
 1. **Clone the repository**
@@ -328,7 +330,7 @@ build_swath_coverage_exe.bat
 build_kmall_exe.bat
 ```
 
-Output is placed in the `dist/` folder, named with the current version (e.g., `Swath_Coverage_Plotter_v2026.20.exe`, `KMALL_to_SwathPKL_Converter_v2026.06.exe`).
+Output is placed in the `dist/` folder, named with the current version (e.g., `Swath_Coverage_Plotter_v2026.23.exe`, `KMALL_to_SwathPKL_Converter_v2026.06.exe`).
 
 For **GSF support in the plotter executable**, place `mbtoolkit/` or `mbtoolkit_gsf/` (with `readers/base/pygsf.py`) next to `SwathCoveragePlotter.spec` before building. The build log reports whether mbtoolkit was included. Without it, the exe still builds but disables `.gsf` handling at runtime.
 
@@ -405,7 +407,9 @@ The **Trend** tab provides a full workflow for determining and exporting the swa
 - **Apply Filters**: Reduce data before plotting using depth, angle, or width filters
 
 ### KMALL Index Sidecars
-During **Calculate Coverage** or **Scan Parameters Only**, the reader can write a `.swathcov.idx` file next to each KMALL source when **Save Index** is enabled. These sidecars speed up re-indexing when the KMALL file has not changed. **Convert to Swath PKL** does not keep index sidecars—it removes them after each file is converted.
+During **Calculate Coverage** or **Scan Parameters Only**, the reader can write a `.swathcov.idx` file next to each KMALL source when **Save Index** is enabled. These sidecars store datagram byte offsets and message types (not a pandas DataFrame) and speed up re-indexing when the KMALL file has not changed. **Convert to Swath PKL** does not keep index sidecars—it removes them after each file is converted.
+
+If an older `.swathcov.idx` file cannot be loaded (for example, because it was pickled with optional `pyarrow` types that are not installed), the reader deletes the incompatible sidecar and rebuilds the index on the next run.
 
 ### For Batch Processing
 - Convert multiple files to PKL format using the KMALL to PKL Converter or the "Convert to Swath PKL" button in the plotter
@@ -471,6 +475,15 @@ During **Calculate Coverage** or **Scan Parameters Only**, the reader can write 
    - Expected for GSF-only sessions (those plots need Kongsberg mode/frequency metadata)
    - **Export Analysis** skips those three PNGs when only GSF data are plotted
 
+13. **Calculate Coverage finishes instantly with 0 soundings / “No files parsed successfully”**
+   - Check the **Activity Log** and terminal output for per-file errors (the log lists the first several failures)
+   - Common cause: an incompatible `.swathcov.idx` sidecar from an older build — delete the sidecar next to the KMALL file or disable **Save Index** and run again; the reader rebuilds indexes automatically
+   - `No module named 'pyarrow'` means an old index sidecar required `pyarrow`; you do **not** need to install `pyarrow` — restart and recalculate coverage so the sidecar is rebuilt
+   - Verify network/UNC paths are reachable and the KMALL files are not empty
+
+14. **Import Analysis Group redraws archive data multiple times**
+   - Current builds defer plot refreshes during import and refresh once at the end; archive PKL loading no longer triggers intermediate redraws
+
 ### Getting Help
 
 1. Check the **Activity Log** in the left panel for detailed error messages
@@ -483,6 +496,7 @@ During **Calculate Coverage** or **Scan Parameters Only**, the reader can write 
 ## Version History
 
 ### Swath Coverage Plotter
+- **v2026.23**: KMALL `.swathcov.idx` sidecars no longer store a pandas `Index` (no `pyarrow` dependency); incompatible old sidecars are deleted and rebuilt automatically; per-file parse errors surfaced when 0/N files succeed; analysis group import uses a single deferred plot refresh and auto-runs coverage when raw files are loaded without existing soundings; stale processed-file tracking reconciled before coverage calculation; GUI parse options snapshotted on the main thread before background parsing
 - **v2026.20**: Optional **GSF** (`.gsf`) coverage-only import via [mbtoolkit](https://github.com/oceanmapping/mbtoolkit) (depth / width / BS); automatic mbtoolkit detection (UI and parsing skip GSF when absent); GSF-only Depth Mode / Pulse Form / Frequency plots show an unsupported notice and are omitted from Export Analysis; `SwathCoveragePlotter.spec` bundles mbtoolkit when present at build time
 - **v2026.12**: Raw tab UI reorganized (**Swath Coverage Calculation**, **Convert to Swath PKL**, **Convert to Archive PKL** groupboxes); **Scan Parameters Only**; **Include Subdirectories**; optional **Save Index** and **Extract Timing**; responsive background raw parsing with cancellable current-file progress; malformed ALL/KMALL hang guards; partial-text selection filters for Raw, Swath PKL, and Archive PKL source lists; depth/width filters kept independent from custom plot limits; **Parameters** tab table with change highlighting (hidden for Swath/Archive PKL-only loads); **Timing** tab hidden unless Extract Timing is enabled; fast KMALL index cache and plot-mode reads; PKL conversion aligned with coverage-only outermost-sounding pipeline
 - **v2026.11**: Enter-to-commit parameter fields with amber draft borders; filter/limit fields editable when groupboxes are off (inactive styling); custom plot depth/width limits auto-fill from data; Export Analysis remembers parent directory and save name between exports and sessions; single plot refresh after export; width filter included in debounced refresh; README and UI workflow documentation updates
