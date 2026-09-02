@@ -636,6 +636,7 @@ def remove_cov_files(self, clear_all=False):
         self.ship_name_updated = False
         self.fnames_scanned_params = []
         self.fnames_plotted_cov = []
+        self.param_scanned = False
 
     else:
         remove_data(self, removed_files)
@@ -846,6 +847,9 @@ def cleanup_kmall_indexes_if_disabled(self, kmall_paths):
 
 def refresh_plot(self, print_time=True, call_source=None, sender=None, validate_filters=True):
     # update swath plot with new data and options
+    if getattr(self, '_defer_plot_refresh', False) and call_source != 'import_analysis_group':
+        return
+
     filter_text_drafts = None
     if hasattr(self, '_apply_committed_filter_text'):
         filter_text_drafts = self._apply_committed_filter_text()
@@ -1221,6 +1225,9 @@ def update_show_data_checks_coverage(self):
         self.det = {}
         clear_lasso_exclusions(self)
         self.show_data_chk.setChecked(False)
+        self.fnames_scanned_params = []
+        self.fnames_plotted_cov = []
+        self.param_scanned = False
 
     if len(fnames_pkl) == 0:  # all archives have been removed
         self.det_archive = {}
@@ -2071,17 +2078,65 @@ def add_ref_filter_text(self):
                            bbox=dict(facecolor='white', edgecolor=None, linewidth=0, alpha=1))
 
 
+def _coverage_parse_basename(path):
+    return os.path.basename(normalize_stored_path(path))
+
+
+def _snapshot_coverage_parse_options(host):
+    """Read GUI options on the main thread before background parsing."""
+    use_pickle_chk = getattr(host, 'use_pickle_files_chk', None)
+    extract_timing_chk = getattr(host, 'extract_timing_chk', None)
+    return {
+        'use_pickle': bool(use_pickle_chk and use_pickle_chk.isChecked()),
+        'extract_timing': bool(extract_timing_chk and extract_timing_chk.isChecked()),
+        'save_index_file': save_index_file_enabled(host),
+        'print_updates': bool(getattr(host, 'print_updates', False)),
+    }
+
+
+def _reconcile_processed_file_tracking(self):
+    """Keep processed-file tracking consistent with actual detection data."""
+    det_fnames = set()
+    try:
+        det_fnames = {_coverage_parse_basename(f) for f in self.det.get('fname', [])}
+    except (TypeError, AttributeError):
+        det_fnames = set()
+
+    if not det_fnames:
+        if self.fnames_plotted_cov or self.fnames_scanned_params:
+            update_log(
+                self,
+                'Clearing stale processed-file tracking (no soundings in detection dictionary).'
+            )
+        self.fnames_plotted_cov = []
+        self.fnames_scanned_params = []
+        return
+
+    def _still_in_det(name):
+        return _coverage_parse_basename(name) in det_fnames
+
+    plotted_before = len(self.fnames_plotted_cov)
+    scanned_before = len(self.fnames_scanned_params)
+    self.fnames_plotted_cov = [f for f in self.fnames_plotted_cov if _still_in_det(f)]
+    self.fnames_scanned_params = [f for f in self.fnames_scanned_params if _still_in_det(f)]
+    removed = (plotted_before - len(self.fnames_plotted_cov) +
+               scanned_before - len(self.fnames_scanned_params))
+    if removed:
+        update_log(self, f'Removed {removed} stale processed-file tracking entries.')
+
+
 class CoverageParseWorker(QThread):
     """Parse raw .all/.kmall files off the GUI thread."""
     progress = pyqtSignal(int, str)
     log_message = pyqtSignal(str)
     finished_parse = pyqtSignal(dict)
 
-    def __init__(self, host, fnames_new, params_only):
+    def __init__(self, host, fnames_new, params_only, parse_options):
         super().__init__()
         self.host = host
         self.fnames_new = fnames_new
         self.params_only = params_only
+        self.parse_options = parse_options
 
     def run(self):
         reset_cancel()
@@ -2090,6 +2145,7 @@ class CoverageParseWorker(QThread):
                 self.host,
                 self.fnames_new,
                 self.params_only,
+                self.parse_options,
                 progress_callback=lambda value, text: self.progress.emit(
                     value, '' if text is None else text
                 ),
@@ -2105,6 +2161,7 @@ class CoverageParseWorker(QThread):
                 'cancelled': is_cancelled(),
                 'scanned_fnames': [],
                 'plotted_fnames': [],
+                'parse_errors': [],
                 'error': str(exc),
             }
         self.finished_parse.emit(result)
@@ -2117,8 +2174,11 @@ def _coverage_parse_log(host, message):
         update_log(host, message)
 
 
-def _run_coverage_file_parse(host, fnames_new, params_only, progress_callback=None, log_callback=None):
+def _run_coverage_file_parse(host, fnames_new, params_only, parse_options,
+                             progress_callback=None, log_callback=None):
     """Parse raw files and return parsed data without touching Qt widgets."""
+    parse_options = parse_options or {}
+
     def emit_log(message):
         if log_callback:
             log_callback(message)
@@ -2134,11 +2194,16 @@ def _run_coverage_file_parse(host, fnames_new, params_only, progress_callback=No
     kmall_paths_attempted = []
     scanned_fnames = []
     plotted_fnames = []
+    parse_errors = []
     i = 0
     f = -1
+    use_pickle = parse_options.get('use_pickle', False)
+    extract_timing = parse_options.get('extract_timing', False)
+    save_index_file = parse_options.get('save_index_file', True)
+    print_updates = parse_options.get('print_updates', False)
 
     for f in range(num_new_files):
-        fname_str = fnames_new[f].rsplit('/')[-1]
+        fname_str = _coverage_parse_basename(fnames_new[f])
         ftype = fname_str.rsplit('.', 1)[-1].lower()
         if emit_progress(f, f'Current file [{f + 1}/{num_new_files}]: {fname_str}'):
             emit_log('Processing cancelled by user.')
@@ -2146,7 +2211,6 @@ def _run_coverage_file_parse(host, fnames_new, params_only, progress_callback=No
         emit_log(f"Processing file {f + 1}/{num_new_files}: {fname_str}")
 
         try:
-            use_pickle = getattr(host, 'use_pickle_files_chk', None) and host.use_pickle_files_chk.isChecked()
             pickle_file = None
 
             if use_pickle:
@@ -2175,20 +2239,16 @@ def _run_coverage_file_parse(host, fnames_new, params_only, progress_callback=No
             begin_file_parse()
             if ftype == 'all':
                 emit_log(f"Parsing .all file: {fname_str}")
-                data_new[i] = readALLswath(host, fnames_new[f], print_updates=host.print_updates,
+                data_new[i] = readALLswath(host, fnames_new[f], print_updates=print_updates,
                                            parse_outermost_only=True, parse_params_only=params_only)
 
             elif ftype == 'kmall':
                 emit_log(f"Parsing .kmall file: {fname_str}")
                 kmall_paths_attempted.append(fnames_new[f])
-                extract_timing = (not params_only and
-                                  getattr(host, 'extract_timing_chk', None) and
-                                  host.extract_timing_chk.isChecked())
-                include_skm = extract_timing
-                save_index_file = save_index_file_enabled(host)
+                include_skm = (not params_only and extract_timing)
 
                 kmall_start_time = process_time()
-                data_new[i] = readKMALLswath(host, fnames_new[f], print_updates=host.print_updates,
+                data_new[i] = readKMALLswath(host, fnames_new[f], print_updates=print_updates,
                                              include_skm=include_skm, parse_params_only=params_only,
                                              read_mode='plot' if not params_only else 'param',
                                              save_index_file=save_index_file)
@@ -2226,7 +2286,7 @@ def _run_coverage_file_parse(host, fnames_new, params_only, progress_callback=No
                     continue
                 emit_log(f"Parsing .gsf file (coverage: depth/width/BS): {fname_str}")
                 gsf_start_time = process_time()
-                data_new[i] = readGSFswath(host, fnames_new[f], print_updates=host.print_updates,
+                data_new[i] = readGSFswath(host, fnames_new[f], print_updates=print_updates,
                                            parse_params_only=params_only)
                 gsf_processing_time = process_time() - gsf_start_time
                 file_size_mb = os.path.getsize(fnames_new[f]) / (1024 * 1024)
@@ -2256,11 +2316,15 @@ def _run_coverage_file_parse(host, fnames_new, params_only, progress_callback=No
         except ParseGuardError as exc:
             if ftype == 'kmall':
                 cleanup_kmall_index_if_disabled(host, fnames_new[f])
-            emit_log(f"Aborted parsing {fname_str}: {exc}")
+            msg = f"Aborted parsing {fname_str}: {exc}"
+            parse_errors.append(msg)
+            emit_log(msg)
         except Exception as exc:
             if ftype == 'kmall':
                 cleanup_kmall_index_if_disabled(host, fnames_new[f])
-            emit_log(f"Failed to parse {fname_str}: {exc}")
+            msg = f"Failed to parse {fname_str}: {exc}"
+            parse_errors.append(msg)
+            emit_log(msg)
 
         emit_progress(f + 1)
 
@@ -2273,6 +2337,7 @@ def _run_coverage_file_parse(host, fnames_new, params_only, progress_callback=No
         'cancelled': is_cancelled(),
         'scanned_fnames': scanned_fnames,
         'plotted_fnames': plotted_fnames,
+        'parse_errors': parse_errors,
     }
 
 
@@ -2299,20 +2364,38 @@ def _finish_calc_coverage(self, parse_result, params_only, operation_name, num_n
         if not params_only:
             self.fnames_plotted_cov.extend(parse_result.get('plotted_fnames', []))
 
-        update_log(self, f"Processing {len(data_new)} parsed files...")
-        self.data_new = interpretMode(self, data_new, print_updates=self.print_updates)
-        det_new = sortDetectionsCoverage(self, data_new, print_updates=self.print_updates, params_only=params_only)
+        parse_errors = parse_result.get('parse_errors', [])
+        if parse_errors:
+            for err_msg in parse_errors[:5]:
+                update_log(self, err_msg)
+            if len(parse_errors) > 5:
+                update_log(self, f'...and {len(parse_errors) - 5} more parse error(s).')
+
+        if not data_new:
+            if num_new_files > 0:
+                summary = (f'No files parsed successfully ({i}/{num_new_files}). '
+                           'Check the log for per-file errors.')
+                update_log(self, summary)
+                print(summary)
+                if parse_errors:
+                    print('First parse error:', parse_errors[0])
+            det_new = {}
+        else:
+            update_log(self, f"Processing {len(data_new)} parsed files...")
+            self.data_new = interpretMode(self, data_new, print_updates=self.print_updates)
+            det_new = sortDetectionsCoverage(self, data_new, print_updates=self.print_updates, params_only=params_only)
 
         if det_new.get('fname'):
             clear_lasso_exclusions(self)
-
-        if len(self.det) == 0:
-            self.det = det_new
-            update_log(self, f"Created new detection dictionary with {len(det_new)} keys")
-        else:
-            for key, value in det_new.items():
-                self.det[key].extend(value)
-            update_log(self, "Appended new data to existing detection dictionary")
+            if not self.det.get('fname'):
+                self.det = det_new
+                update_log(self, f"Created new detection dictionary with {len(det_new['fname'])} soundings")
+            else:
+                for key, value in det_new.items():
+                    self.det[key].extend(value)
+                update_log(self, "Appended new data to existing detection dictionary")
+        elif num_new_files > 0:
+            update_log(self, f"No sounding data parsed from {num_new_files} file(s); detection dictionary unchanged.")
 
         success_msg = f"Successfully processed {i} out of {num_new_files} files"
         if hasattr(self, 'log_success'):
@@ -2329,17 +2412,19 @@ def _finish_calc_coverage(self, parse_result, params_only, operation_name, num_n
                                               self.extract_timing_chk.isChecked())
             update_timing_tab_visibility(self)
 
-            if not self.show_data_chk.isChecked():
-                self.show_data_chk.setChecked(True)
-            else:
-                refresh_plot(self, print_time=True, call_source='calc_coverage')
+            if det_new.get('fname'):
+                if not self.show_data_chk.isChecked():
+                    self.show_data_chk.setChecked(True)
+                else:
+                    refresh_plot(self, print_time=True, call_source='calc_coverage')
 
             self.plot_tabs.setCurrentIndex(0)
         else:
             self.plot_tabs.setCurrentIndex(self.parameters_tab_index)
 
         cleanup_kmall_indexes_if_disabled(self, kmall_paths_attempted)
-        sort_det_time(self)
+        if self.det.get('fname'):
+            sort_det_time(self)
 
         if hasattr(self, 'end_operation_log'):
             self.end_operation_log(operation_name, f"Processed {i}/{num_new_files} files successfully")
@@ -2373,6 +2458,8 @@ def calc_coverage(self, params_only=False):
     except:
         fnames_det = []  # self.det has not been created yet
         self.det = {}
+
+    _reconcile_processed_file_tracking(self)
 
     # fnames_new = get_new_file_list(self, ['.all', '.kmall'], fnames_det)  # list new .all files not in det dict
 
@@ -2424,7 +2511,9 @@ def calc_coverage(self, params_only=False):
                 f'{progress_prefix}...',
                 num_new_files
             )
-            self._coverage_parse_worker = CoverageParseWorker(self, fnames_new, params_only)
+            self._coverage_parse_worker = CoverageParseWorker(
+                self, fnames_new, params_only, _snapshot_coverage_parse_options(self)
+            )
             self._coverage_parse_worker.log_message.connect(
                 lambda msg: _coverage_parse_log(self, msg),
                 Qt.ConnectionType.QueuedConnection,
@@ -2448,22 +2537,12 @@ def calc_coverage(self, params_only=False):
             self._coverage_parse_worker.start()
             return
 
-        _finish_calc_coverage(
-            self,
-            {
-                'data_new': {},
-                'skm_time': {},
-                'i': 0,
-                'f': -1,
-                'kmall_paths_attempted': [],
-                'scanned_fnames': [],
-                'plotted_fnames': [],
-            },
-            params_only,
-            operation_name,
-            num_new_files,
-            progress_prefix,
-        )
+        update_log(self, 'No unprocessed source files remain for this operation.')
+        if hasattr(self, 'end_operation_log'):
+            self.end_operation_log(operation_name, "No new files to process")
+        update_button_states(self)
+        if hasattr(self, 'update_save_plots_button_color'):
+            self.update_save_plots_button_color()
         return
 
     update_button_states(self)
@@ -4362,46 +4441,59 @@ def import_analysis_group(self):
         self.spec_colors = {}
     if hasattr(self, 'spec_source_paths'):
         self.spec_source_paths = {}
+    self.param_scanned = False
 
-    _apply_analysis_settings(self, payload)
+    self._defer_plot_refresh = True
+    if hasattr(self, 'filter_update_timer') and self.filter_update_timer is not None:
+        self.filter_update_timer.stop()
 
-    json_dir = os.path.dirname(os.path.abspath(json_path))
+    raw_files = []
+    try:
+        _apply_analysis_settings(self, payload)
 
-    def _existing_paths(paths, label):
-        existing = []
-        missing = []
-        for p in paths:
-            resolved = _resolve_analysis_source_path(p, json_dir)
-            if resolved and os.path.exists(resolved):
-                existing.append(resolved)
-            elif p:
-                missing.append(p)
-        if missing:
-            update_log(self, f'{label}: skipped {len(missing)} missing file(s)')
-            for missing_path in missing:
-                update_log(self, f'  Missing: {missing_path}')
-        return existing
+        json_dir = os.path.dirname(os.path.abspath(json_path))
 
-    source_files = payload.get('source_files', {})
+        def _existing_paths(paths, label):
+            existing = []
+            missing = []
+            for p in paths:
+                resolved = _resolve_analysis_source_path(p, json_dir)
+                if resolved and os.path.exists(resolved):
+                    existing.append(resolved)
+                elif p:
+                    missing.append(p)
+            if missing:
+                update_log(self, f'{label}: skipped {len(missing)} missing file(s)')
+                for missing_path in missing:
+                    update_log(self, f'  Missing: {missing_path}')
+            return existing
 
-    raw_files = _existing_paths(source_files.get('raw_files', []), 'Raw files')
-    swath_pkl_files = _existing_paths(source_files.get('swath_pkl_files', []), 'Swath PKL files')
-    archive_pkl_files = _existing_paths(source_files.get('archive_pkl_files', []), 'Archive PKL files')
-    spec_curve_files = _existing_paths(source_files.get('spec_curve_files', []), 'Spec curve files')
+        source_files = payload.get('source_files', {})
 
-    if raw_files:
-        update_file_list(self, raw_files, verbose=True)
-    if swath_pkl_files and hasattr(self, '_process_pkl_files_directly'):
-        self._process_pkl_files_directly(swath_pkl_files)
-    if archive_pkl_files:
-        load_archive_files(self, archive_pkl_files)
-    if spec_curve_files:
-        load_spec_files(self, spec_curve_files)
+        raw_files = _existing_paths(source_files.get('raw_files', []), 'Raw files')
+        swath_pkl_files = _existing_paths(source_files.get('swath_pkl_files', []), 'Swath PKL files')
+        archive_pkl_files = _existing_paths(source_files.get('archive_pkl_files', []), 'Archive PKL files')
+        spec_curve_files = _existing_paths(source_files.get('spec_curve_files', []), 'Spec curve files')
 
-    # Match manual file-add behavior: refresh button enable/highlight states after import.
-    update_button_states(self)
+        if raw_files:
+            update_file_list(self, raw_files, verbose=True)
+        if swath_pkl_files and hasattr(self, '_process_pkl_files_directly'):
+            self._process_pkl_files_directly(swath_pkl_files)
+        if archive_pkl_files:
+            load_archive_files(self, archive_pkl_files, refresh=False)
+        if spec_curve_files:
+            load_spec_files(self, spec_curve_files)
 
-    refresh_plot(self, call_source='import_analysis_group')
+        # Match manual file-add behavior: refresh button enable/highlight states after import.
+        update_button_states(self)
+    finally:
+        self._defer_plot_refresh = False
+
+    if raw_files and not (getattr(self, 'det', None) or {}).get('fname'):
+        update_log(self, 'Raw source files loaded; calculating coverage...')
+        calc_coverage(self, params_only=False)
+    else:
+        refresh_plot(self, call_source='import_analysis_group')
     update_log(self, f'Imported analysis group from {os.path.basename(json_path)}')
 
 
@@ -4639,7 +4731,7 @@ def convert_swath_pkl_to_archive(self):
     config["last_archive_save_dir"] = parent_dir
     save_session_config(config)
 
-def load_archive_files(self, archive_files):
+def load_archive_files(self, archive_files, refresh=True):
     import os
     import pickle
     import gzip
@@ -4683,10 +4775,12 @@ def load_archive_files(self, archive_files):
     if hasattr(self, 'update_save_plots_button_color'):
         self.update_save_plots_button_color()
     if not self.show_data_chk_arc.isChecked():
-        print('setting show_data_chk_arc to True')
-        self.show_data_chk_arc.setChecked(True)
-        print('show_data_chk_arc is now', self.show_data_chk_arc.isChecked())
-    else:
+        self.show_data_chk_arc.blockSignals(True)
+        try:
+            self.show_data_chk_arc.setChecked(True)
+        finally:
+            self.show_data_chk_arc.blockSignals(False)
+    elif refresh:
         refresh_plot(self)
 
 
@@ -6658,7 +6752,9 @@ def build_param_table_rows(self, include_initial=False):
     return rows
 
 def sort_det_time(self):  # sort detections by time (after new files are added)
-    # Debug print removed
+    if not self.det.get('fname'):
+        return
+
     datetime_orig = deepcopy(self.det['datetime'])
     for k, v in self.det.items():
         # print('...sorting ', k)
@@ -6781,11 +6877,17 @@ def get_param_changes(self, search_dict={}, update_log=False, header='', include
 
     update_param_log_header(self, header, clear_table=True)
 
+    if not self.det.get('fname'):
+        return
+
     idx_change = []
     for param, crit in search_dict.items():  # find CHANGES for each parameter of interest, then sort
         # print('****** SEARCHING DETECTION DICT FOR PARAMETER, CRIT = ', param, crit)
         if param == 'datetime':  # skip datetime, which changes for every entry
             # print('skipping datetime')
+            continue
+
+        if param not in self.det or not self.det[param]:
             continue
 
         p_last = self.det[param][0]

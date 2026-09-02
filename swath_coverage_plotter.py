@@ -26,7 +26,7 @@ Key Features:
 - Interactive data exploration tools
 """
 # Version tracking for the application
-__version__ = "2026.22" 
+__version__ = "2026.23" 
 
 # BSD-3-Clause License
 #
@@ -747,6 +747,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         Line-edit parameter fields always require Enter to commit; they are not scheduled here.
         """
+        if getattr(self, '_defer_plot_refresh', False):
+            return
+
         # Lazily create the timer the first time we need it
         if self.filter_update_timer is None:
             self.filter_update_timer = QtCore.QTimer(self)

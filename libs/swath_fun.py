@@ -888,7 +888,8 @@ class kmall_data(kmall):
 		self.msgtime = cache['msgtime']
 		self.msgtype = cache['msgtype']
 		self.pktcnt = cache['pktcnt']
-		self.Index = cache['Index']
+		# Index is optional; coverage parsing only needs msgoffset/msgtype lists.
+		self.Index = cache.get('Index')
 
 	def _save_index_cache(self, mtime, size):
 		try:
@@ -899,8 +900,7 @@ class kmall_data(kmall):
 			         'msgsize': self.msgsize,
 			         'msgtime': self.msgtime,
 			         'msgtype': self.msgtype,
-			         'pktcnt': self.pktcnt,
-			         'Index': self.Index}
+			         'pktcnt': self.pktcnt}
 			with open(self._index_cache_path(), 'wb') as cache_fid:
 				pickle.dump(cache, cache_fid, protocol=pickle.HIGHEST_PROTOCOL)
 		except OSError:
@@ -922,8 +922,11 @@ class kmall_data(kmall):
 				if cache.get('mtime') == st.st_mtime and cache.get('size') == st.st_size:
 					self._apply_index_cache(cache)
 					return
-			except (OSError, EOFError, pickle.UnpicklingError, KeyError, ValueError):
-				pass
+			except (OSError, EOFError, pickle.UnpicklingError, KeyError, ValueError, ModuleNotFoundError):
+				try:
+					os.remove(cache_path)
+				except OSError:
+					pass
 
 		self.index_file()
 		if self.save_index_file:
